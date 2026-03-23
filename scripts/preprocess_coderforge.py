@@ -73,7 +73,7 @@ def convert_messages(raw_messages: list[dict]) -> list[dict]:
 
     for msg in raw_messages:
         role = msg.get("role", "")
-        content = msg.get("content", "")
+        content = msg.get("content", "") or ""
 
         if role == "system":
             converted.append({"role": "system", "content": content})
