@@ -51,7 +51,7 @@ def process_dataset(output_path: str, max_rows: int = None):
 
     count = 0
 
-    with open(output_path, "w") as f_out, open(parquet_path, "r") as f_in:
+    with open(output_path, "w", encoding="utf-8") as f_out, open(parquet_path, "r", encoding="utf-8") as f_in:
         for line in f_in:
             if max_rows and count >= max_rows:
                 break
