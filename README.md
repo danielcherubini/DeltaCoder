@@ -99,9 +99,14 @@ python scripts/merge_datasets.py
 
 ### 3. Train on cloud GPU
 
+Rent an A100 80GB on [Vast.ai](https://vast.ai) using the **"Axolotl - LLM Fine Tuning"** template (CUDA 12.6, 200GB container). It comes with Axolotl, PyTorch, Transformers, and PEFT pre-installed.
+
 ```bash
-pip install axolotl peft transformers accelerate datasets
+# Install Qwen3.5-specific dependency (not in template)
 pip install flash-linear-attention==0.4.1
+pip uninstall causal-conv1d -y
+
+# Upload data/train.jsonl and configs/ to the instance, then:
 
 # Quick test (verify loss decreases)
 accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora.yaml \

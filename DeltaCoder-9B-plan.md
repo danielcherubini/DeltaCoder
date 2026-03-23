@@ -136,20 +136,42 @@ scripts/
 | **Total** | **~238K** | |
 
 ## Cloud Training Setup
-1. Rent GPU on Vast.ai or RunPod
+
+**Platform**: Vast.ai with "Axolotl - LLM Fine Tuning" Docker template (CUDA 12.6, 200GB container)
+
+Template includes: Axolotl, PyTorch, Transformers, PEFT, bitsandbytes, flash-attention, DeepSpeed, wandb
+
+### Steps
+1. Rent A100 80GB on Vast.ai with the Axolotl template
 2. SSH into instance
-3. `pip install peft transformers accelerate axolotl datasets`
-4. Download base model from HuggingFace
-5. Download/prepare dataset
-6. Run LoRA fine-tune
-7. Export merged model + convert to GGUF
-8. SCP/rsync GGUF to local machine
-9. Load into local inference server (llama.cpp / Ollama)
+3. Install Qwen3.5 dependencies (not included in template):
+   ```bash
+   pip install flash-linear-attention==0.4.1
+   pip uninstall causal-conv1d -y  # conflicts with flash-linear-attention
+   ```
+4. Upload `data/train.jsonl` and `configs/deltacoder-9b-lora.yaml`
+5. Login to HuggingFace (for base model download):
+   ```bash
+   huggingface-cli login
+   ```
+6. Test run (verify loss decreases before committing to full training):
+   ```bash
+   accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora.yaml \
+     --max_steps=50 --val_set_size=0.1
+   ```
+7. Full training:
+   ```bash
+   accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora.yaml
+   ```
+8. Merge LoRA + export GGUF:
+   ```bash
+   bash scripts/merge_and_export.sh
+   ```
+9. Download GGUFs locally, terminate instance
 
 | Provider | GPU | Cost/hr | Est. Time | Total Cost |
 |----------|-----|---------|-----------|------------|
 | Vast.ai | A100 80GB | $0.67 | 3-5 hrs | **$2-4** |
-| RunPod | A100 80GB | $1.49 | 3-5 hrs | $5-8 |
 | Vast.ai | H100 SXM | $1.67 | 1.5-3 hrs | $3-5 |
 
 ## Output
