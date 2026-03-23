@@ -176,7 +176,7 @@ def process_dataset(output_path: str, split: str = "SWE_Rebench", max_rows: int 
     print(f"Loading CoderForge-Preview split={split}...")
     ds = load_dataset(
         "togethercomputer/CoderForge-Preview",
-        "Trajectories",
+        "trajectories",
         split=split,
         streaming=True
     )
