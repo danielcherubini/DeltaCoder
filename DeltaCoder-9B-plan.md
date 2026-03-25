@@ -203,19 +203,28 @@ Template includes: Axolotl, PyTorch, Transformers, PEFT, bitsandbytes, flash-att
 - Ollama is ~40-65% slower than raw llama.cpp for Qwen3.5 — prefer llama-server for benchmarking
 - VRAM-constrained GPUs can slow down after long prompts (>10K tokens) due to SSM state checkpoints
 
+## Training Issues & Fixes
+- **PyArrow schema conflict on `tools` field**: Different datasets have different tool definitions (different parameter schemas), causing `TypeError: Couldn't cast array of type struct<...>` when HF datasets tries to infer a unified schema. **Fix**: Strip `tools` field from train.jsonl and remove `field_tools` from Axolotl config. The model still learns correct tool_call JSON format from the assistant messages — tool definitions are provided at inference time anyway. **Future improvement**: Normalize tool schemas across datasets so `tools` can be included in training (would teach the model to use tools it hasn't seen before).
+- **Empty turn warnings**: Some messages have `null` content (e.g., assistant turns that only contain `tool_calls`). Axolotl warns "Content end boundary is the same as start boundary" — harmless, training continues fine.
+
 ## Status
 - [x] Inspect base model layers — LoRA target names confirmed via dry run
 - [x] Verify GGUF/llama.cpp/Ollama support — confirmed working
 - [x] Verify chat template supports tool_calls — confirmed (4047 char template)
 - [x] Verify preprocessing scripts — all parsers working
 - [x] Verify VRAM fits A100 80GB — ~28-29GB estimated, fits easily
-- [ ] Run preprocessing scripts on full datasets (CPU only, no GPU needed)
-- [ ] Write Axolotl config with verified target_modules
-- [ ] Rent cloud GPU (Vast.ai A100 80GB recommended)
-- [ ] Set up training environment (PEFT + Axolotl via SSH)
-- [ ] Run 10-min test on 100 rows (verify loss goes down before full run)
-- [ ] Run full LoRA fine-tune
-- [ ] Export to GGUF + generate quants
-- [ ] Transfer GGUFs to local machine
-- [ ] Benchmark against baselines
-- [ ] Publish to HuggingFace
+- [x] Run preprocessing scripts on full datasets — 238,590 rows, 14.7GB train.jsonl
+- [x] Write Axolotl config with verified target_modules
+- [x] Rent cloud GPU — Vast.ai A100 SXM4 80GB, then H200 140GB ($2.50/hr)
+- [x] Set up training environment — Unsloth 2026.3.10 + Transformers 5.3.0
+- [x] Upload training data — MD5 verified
+- [x] Run full LoRA fine-tune — 3,125 steps, 10.14hrs on H200, final loss ~0.94
+- [x] Export to GGUF — Q4_K_M (5.3GB), Q5_K_M (6.1GB), Q6_K (6.9GB), Q8_0 (8.9GB)
+- [x] Publish to HuggingFace — danielcherubini/Qwen3.5-DeltaCoder-9B + GGUF
+- [ ] Benchmark against baselines (HumanEval, Terminal-Bench, SWE-Bench)
+
+## Training History
+- **Attempt 1**: Axolotl on A100 — O(n^2) tokenization bug, pre-tokenized to work around it
+- **Attempt 2**: Axolotl on H200 — too slow (74hr estimate, ~$185), killed
+- **Attempt 3**: Unsloth on H200 with pre-tokenized data — multiple issues (SFTTrainer incompatible, bitsandbytes broken)
+- **Attempt 4 (final)**: Unsloth on H200 with CoderForge from HF — 10.14hrs, ~$25, success

@@ -1,12 +1,23 @@
-# DeltaCoder-9B
+# Qwen3.5-DeltaCoder-9B
 
 > Reliable tool-calling for agentic coding — LoRA fine-tune of Qwen3.5-9B
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
-[![HuggingFace](https://img.shields.io/badge/HuggingFace-DeltaCoder--9B-yellow)](https://huggingface.co/danielcherubini/DeltaCoder-9B-GGUF)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-GGUF-yellow)](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF)
+[![LoRA](https://img.shields.io/badge/HuggingFace-LoRA-orange)](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B)
 
 Small language models can reason about code, but they struggle to **call tools reliably**. DeltaCoder takes a strong reasoning base and teaches it to produce correctly-formatted JSON tool calls — the kind that coding agents like [OpenCode](https://github.com/opencode-ai/opencode), [Pi](https://github.com/badlogic/pi-mono), and [Cline](https://github.com/cline/cline) depend on.
+
+## Downloads
+
+| Format | Link | Size |
+|--------|------|------|
+| GGUF Q4_K_M | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF) | 5.3 GB |
+| GGUF Q5_K_M | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF) | 6.1 GB |
+| GGUF Q6_K | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF) | 6.9 GB |
+| GGUF Q8_0 | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF) | 8.9 GB |
+| LoRA adapter | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B) | 661 MB |
 
 ## The Problem
 
@@ -17,135 +28,150 @@ tool=edit, error=JSON Parse error: Property name must be a string literal
 tool=bash, error=JSON Parse error: Expected '}'
 ```
 
-The model picks the right tool and the right content, but breaks on JSON serialization — especially when arguments contain multi-line code, nested quotes, or special characters. [OmniCoder-9B](https://huggingface.co/Tesslate/OmniCoder-9B) solves the agentic side (23.6% Terminal-Bench) but sacrifices reasoning (36% HumanEval).
+The model picks the right tool and the right content, but breaks on JSON serialization — especially when arguments contain multi-line code, nested quotes, or special characters.
 
-**DeltaCoder aims to do both.**
+**DeltaCoder aims to fix this.**
 
-## Target Benchmarks
+## Training Details
 
-| Benchmark | Jackrong v2 (base) | OmniCoder-9B | DeltaCoder-9B (target) |
-|---|---|---|---|
-| HumanEval | **53.7%** | 36.0% | >50% |
-| Terminal-Bench 2.0 | — | **23.6%** | >30% |
-| SWE-Bench Verified | — | — | >25% |
+| Parameter | Value |
+|-----------|-------|
+| Base model | Qwen3.5-9B (hybrid GDN architecture) |
+| Method | LoRA (r=64, alpha=32) |
+| Dataset | [CoderForge-Preview](https://huggingface.co/datasets/togethercomputer/CoderForge-Preview) `filtered_reward1` (50K subset) |
+| Sequence length | 4096 |
+| Effective batch size | 16 (batch=2 x grad_accum=8) |
+| Learning rate | 1e-4 (cosine schedule) |
+| Epochs | 1 |
+| Optimizer | AdamW |
+| Precision | BF16 |
+| Hardware | NVIDIA H200 140GB (Vast.ai) |
+| Training time | ~10 hours |
+| Training cost | ~$25 |
+| Framework | Unsloth 2026.3.10 + HuggingFace Transformers 5.3.0 |
+| Final loss | ~0.94 |
 
-## Approach
+### LoRA Target Modules
 
-**LoRA SFT** on ~238K tool-calling trajectories, normalized to OpenAI JSON `tool_calls` format.
+All major weight matrices are adapted across the hybrid architecture:
 
-### Base Model
+- **Full Attention** (8/32 layers): `q_proj`, `k_proj`, `v_proj`, `o_proj`
+- **Gated Delta Net** (24/32 layers): `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj`
+- **MLP** (all 32 layers): `gate_proj`, `up_proj`, `down_proj`
 
-- **Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2**
-- Architecture: Qwen3.5-9B hybrid (Gated Delta Networks + Gated Attention)
-- Claude Opus reasoning distillation with concise thinking chains
+## Usage
 
-### Training Data
+### Ollama
 
-Four open-source datasets, all converted to OpenAI JSON format:
+```bash
+ollama create deltacoder -f Modelfile
+```
 
-| Dataset | Filtered Rows | Source |
-|---|---|---|
-| [CoderForge-Preview](https://huggingface.co/datasets/togethercomputer/CoderForge-Preview) | ~155K | togethercomputer |
-| [Nemotron-SWE-v1](https://huggingface.co/datasets/nvidia/Nemotron-SWE-v1) | ~51K | NVIDIA |
-| [Nemotron-Agentic-v1](https://huggingface.co/datasets/nvidia/Nemotron-Agentic-v1) | ~19K | NVIDIA |
-| [SWE-agent-trajectories](https://huggingface.co/datasets/nebius/SWE-agent-trajectories) | ~13K | Nebius |
+### llama.cpp / ik_llama.cpp
 
-> [!NOTE]
-> Each dataset uses a different tool-call format (XML, JSON, plain text). The preprocessing scripts normalize everything to OpenAI `tool_calls` JSON — the format that local inference servers (llama.cpp, Ollama) expose.
+```bash
+./llama-server -m Qwen3.5-DeltaCoder-9B-Q5_K_M.gguf -ngl 999 -c 131072 -ctk f16 -ctv q4_0 -fa 1 --jinja
+```
 
-### Training Config
+### With PEFT (Python)
 
-- **Framework**: HuggingFace PEFT + Axolotl
-- **Method**: LoRA (r=64, alpha=32) targeting all GDN, attention, and MLP layers
-- **Hardware**: A100 80GB (~3-5 hours, ~$2-4 on Vast.ai)
-- **Precision**: bf16 with gradient checkpointing
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+base = AutoModelForCausalLM.from_pretrained(
+    "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2",
+    trust_remote_code=True,
+)
+model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
+```
 
 ## Project Structure
 
 ```
 configs/
-  deltacoder-9b-lora.yaml        # Axolotl training configuration
+  deltacoder-9b-lora.yaml        # Axolotl training configuration (legacy)
 scripts/
-  dry_run.py                      # Pre-flight validation (no GPU needed)
-  preprocess_coderforge.py        # XML → OpenAI JSON
+  train_unsloth.py                # Unsloth training script (used for final training)
+  pretokenize.py                  # Pre-tokenization script
+  preprocess_coderforge.py        # XML -> OpenAI JSON
   preprocess_nemotron_swe.py      # Schema normalization
   preprocess_nemotron_agentic.py  # Strip reasoning_content
-  preprocess_sweagent.py          # Plain text → OpenAI JSON
+  preprocess_sweagent.py          # Plain text -> OpenAI JSON
   merge_datasets.py               # Combine and shuffle all datasets
-  merge_and_export.sh             # LoRA merge + GGUF quantization
 ```
-
-## Getting Started
-
-### 1. Validate before spending on GPU
-
-```bash
-pip install transformers peft datasets
-python scripts/dry_run.py
-```
-
-This checks model architecture, LoRA target modules, chat template support, preprocessing correctness, and VRAM estimates — all on CPU.
-
-### 2. Preprocess datasets
-
-```bash
-pip install datasets
-python scripts/preprocess_coderforge.py
-python scripts/preprocess_nemotron_swe.py
-python scripts/preprocess_nemotron_agentic.py
-python scripts/preprocess_sweagent.py
-python scripts/merge_datasets.py
-```
-
-### 3. Train on cloud GPU
-
-Rent an A100 80GB on [Vast.ai](https://vast.ai) using the **"Axolotl - LLM Fine Tuning"** template (CUDA 12.6, 200GB container). It comes with Axolotl, PyTorch, Transformers, and PEFT pre-installed.
-
-```bash
-# Install Qwen3.5-specific dependency (not in template)
-pip install flash-linear-attention==0.4.1
-pip uninstall causal-conv1d -y
-
-# Upload data/train.jsonl and configs/ to the instance, then:
-
-# Quick test (verify loss decreases)
-accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora.yaml \
-  --max_steps=50 --val_set_size=0.1
-
-# Full training
-accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora.yaml
-```
-
-### 4. Export to GGUF
-
-```bash
-bash scripts/merge_and_export.sh
-```
-
-Produces Q4_K_S, Q4_K_M, Q5_K_M, Q6_K, and Q8_0 quantizations.
 
 ## Key Findings
 
-A few things discovered during development that may help others working with Qwen3.5:
+Things discovered during development that may help others working with Qwen3.5:
 
-> [!IMPORTANT]
-> **Unsloth does not support Qwen3.5.** Its custom kernels only handle standard transformer attention/MLP. Use HuggingFace PEFT instead.
+> [!NOTE]
+> **Unsloth now supports Qwen3.5** (as of 2026.3.10) with custom Triton kernels. It's significantly faster than Axolotl for this architecture.
 
 > [!WARNING]
-> **Do not use `flash_attention_2` with sample packing on Qwen3.5** — this causes training loss to go to 0 ([axolotl#3453](https://github.com/axolotl-ai-cloud/axolotl/issues/3453)). Use `attn_implementation: sdpa` instead.
+> **Do not use `flash_attention_2` with sample packing on Qwen3.5** — this causes training loss to go to 0. Use `attn_implementation: sdpa` instead.
 
-- Qwen3.5 uses **Gated Delta Networks** (not Mamba) — requires `flash-linear-attention` for sample packing
-- LoRA kernel optimizations must be disabled (`lora_*_kernel: false`) to avoid assertion errors
-- The GDN layer names are `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj` — not the commonly assumed `in_proj`, `x_proj`, `dt_proj`
+- Qwen3.5 uses **Gated Delta Networks** (not Mamba) — the GDN layer names are `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj`
+- The tokenizer is a `Qwen3VLProcessor` — standard `DataCollatorForSeq2Seq` won't work (lacks `.pad()`), use a custom collator or Unsloth's native pipeline
+- `bitsandbytes adamw_8bit` may fail on some CUDA setups — `adamw_torch` is a safe fallback
+- `causal-conv1d` may not build if system CUDA and PyTorch CUDA versions mismatch — flash-linear-attention falls back to torch (slower but works)
+- Unsloth skips sample packing for processor-based models — still fast enough on H200
+
+## Recommended Sampling Settings
+
+Validated through testing with [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) and [Kronk](https://github.com/danielcherubini/kronk) on an RTX 3080 10GB.
+
+| Profile | temperature | top_k | top_p | min_p | presence_penalty |
+|---------|-------------|-------|-------|-------|-----------------|
+| **Coding** | 0.6 | 20 | 0.95 | 0.0 | 0.0 |
+| **Chat** | 1.0 | 20 | 0.95 | 0.0 | 1.5 |
+
+> [!WARNING]
+> **Do not use temperature below 0.5** — low temperatures (e.g., 0.3) cause deterministic looping in multi-turn agentic use, where the model repeats the same tool call indefinitely.
+
+### KV Cache Quantization
+
+For VRAM-constrained GPUs, use quantized KV cache keys/values:
+
+| Context Length | KV Cache | VRAM (Q4_K_M) | Generation Speed |
+|---------------|----------|---------------|-----------------|
+| 102,400 | f16/q4_0 | ~8.5 GB | ~111 tok/s |
+| 131,072 | f16/q4_0 | ~9.1 GB | ~110 tok/s |
+
+```bash
+# llama.cpp / ik_llama.cpp flags
+-ctk f16 -ctv q4_0
+```
+
+## Benchmarks
+
+Evaluated using [EvalPlus](https://github.com/evalplus/evalplus) against the Q4_K_M GGUF via ik_llama.cpp.
+
+| Model | HumanEval | HumanEval+ |
+|-------|-----------|------------|
+| Jackrong v2 (base) | 53.7% | — |
+| OmniCoder-9B | 36.0% | — |
+| **DeltaCoder-9B** (temp=0.6) | **50.6%** | **49.4%** |
+| DeltaCoder-9B (greedy) | 43.9% | 42.1% |
+
+DeltaCoder retains most of the base model's code reasoning ability while adding reliable tool-call JSON formatting. Use the recommended sampling settings (temp=0.6) — greedy decoding significantly underperforms.
 
 ## Status
 
 - [x] Dataset research and format analysis
-- [x] Preprocessing scripts
+- [x] Preprocessing scripts (238K rows from 4 datasets)
 - [x] Dry-run validation (layer names, chat template, VRAM)
-- [x] Axolotl training config
-- [ ] Full dataset preprocessing
-- [ ] LoRA fine-tune
-- [ ] GGUF export and quantization
-- [ ] Benchmarking
-- [ ] HuggingFace release
+- [x] Training config (Axolotl -> Unsloth migration)
+- [x] Full LoRA fine-tune (50K CoderForge examples, H200, ~10hrs)
+- [x] GGUF export (Q4_K_M, Q5_K_M, Q6_K, Q8_0)
+- [x] HuggingFace release
+- [x] Benchmarking (HumanEval via EvalPlus)
+- [ ] Benchmarking (Terminal-Bench, SWE-Bench)
+
+## Acknowledgements
+
+- [Unsloth](https://unsloth.ai) for Qwen3.5 training support
+- [Together AI](https://together.ai) for the CoderForge dataset
+- [Jackrong](https://huggingface.co/Jackrong) for the base model
+- [NVIDIA](https://nvidia.com) for Nemotron datasets
+- [Nebius](https://nebius.com) for SWE-agent trajectories

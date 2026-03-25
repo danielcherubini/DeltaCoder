@@ -1,5 +1,5 @@
-# DeltaCoder-9B — LoRA SFT config for Axolotl
-# Target: Vast.ai A100 80GB
+# Qwen3.5-DeltaCoder-9B — LoRA SFT config for Axolotl
+# Target: Vast.ai H200 140GB
 #
 # Prerequisites on the training box:
 #   pip install axolotl peft transformers accelerate datasets
@@ -17,18 +17,13 @@ base_model: Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2
 trust_remote_code: true
 strict: false
 
-# Qwen3.5 has a dedicated chat template in Axolotl with tool_calls support
-chat_template: qwen3_5
-
 # ---------- Dataset ----------
+# Pre-tokenized: input_ids/attention_mask/labels already computed by pretokenize.py
+# This bypasses Axolotl's O(n²) chat_template tokenization (issue #2396)
 datasets:
-  - path: data/train.jsonl
+  - path: /dev/shm/train_tokenized.jsonl
     ds_type: json
-    type: chat_template
-    field_messages: messages
-    field_tools: tools
-    roles_to_train: ["assistant"]
-    train_on_eos: turn
+    type:
 
 val_set_size: 0.02
 dataset_prepared_path: last_run_prepared
@@ -70,9 +65,9 @@ lora_qkv_kernel: false
 lora_o_kernel: false
 
 # ---------- Training ----------
-num_epochs: 2
+num_epochs: 1
 micro_batch_size: 1
-gradient_accumulation_steps: 8
+gradient_accumulation_steps: 4
 optimizer: adamw_torch
 lr_scheduler: cosine
 learning_rate: 2e-4
