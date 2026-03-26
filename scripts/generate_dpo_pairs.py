@@ -107,7 +107,12 @@ def call_api(
 
     Returns list of completion dicts with 'choices' array.
     """
-    client = openai.OpenAI(base_url=api_base)
+    client = openai.OpenAI(
+        base_url=api_base,
+        api_key=os.environ.get(
+            "OPENAI_API_KEY", "sk-none"
+        ),  # local inference doesn't need a real key
+    )
 
     try:
         response = client.chat.completions.create(
@@ -258,9 +263,14 @@ def main():
             word_lengths.append(len(combined.split()))
 
         word_lengths.sort()
-        p50 = word_lengths[int(len(word_lengths) * 0.5)] if word_lengths else 0
-        p90 = word_lengths[int(len(word_lengths) * 0.9)] if word_lengths else 0
-        p99 = word_lengths[int(len(word_lengths) * 0.99)] if word_lengths else 0
+        n = len(word_lengths)
+
+        def _pct(ratio: float) -> int:
+            return word_lengths[max(0, min(n - 1, int(n * ratio)))] if n else 0
+
+        p50 = _pct(0.5)
+        p90 = _pct(0.9)
+        p99 = _pct(0.99)
     else:
         p50 = p90 = p99 = 0
 

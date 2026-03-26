@@ -49,7 +49,7 @@ def parse_args():
         "--merged-dir",
         type=str,
         default="./outputs/deltacoder-9b-dpo-merged",
-        help="Output directory for the merged bf16 model",
+        help="Output directory for the merged fp16 model (save_method='merged_16bit')",
     )
     parser.add_argument(
         "--gguf-dir",
