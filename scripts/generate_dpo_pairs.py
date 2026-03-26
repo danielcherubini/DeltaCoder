@@ -61,11 +61,13 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
             combined_code = code + "\n\n" + "\n".join(tests)
             tmpfile.write_text(combined_code)
 
-            # Run the code using the same Python interpreter that's running this script,
-            # and inherit the environment (with PATH preserved) rather than stripping it,
-            # so PYTHONHOME/PYTHONPATH remain available.
+            # Use the same Python interpreter that runs this script.
+            # Copy the environment but strip Python-specific vars so generated code
+            # cannot import from attacker-controlled PYTHONPATH locations.
             env = os.environ.copy()
             env["PATH"] = "/usr/bin:/usr/local/bin"
+            for _var in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
+                env.pop(_var, None)
             result = subprocess.run(
                 [sys.executable, str(tmpfile)],
                 timeout=10,
@@ -170,8 +172,9 @@ def main():
 
     # Output file
     with open(args.output, "a", encoding="utf-8") as f:
-        for problem in tqdm(ds, desc="Processing problems"):
-            problem_id = problem.get("id")
+        for i, problem in enumerate(tqdm(ds, desc="Processing problems")):
+            # Fallback to index-based id if dataset row has no "id" field
+            problem_id = problem.get("id") or f"idx-{i}"
             if problem_id in checkpoint:
                 continue
 
@@ -233,7 +236,8 @@ def main():
         json.dump(checkpoint, cf)
 
     # Print stats
-    total_tried = len(ds) + len(checkpoint)
+    # total_tried = full dataset size (checkpoint entries are a subset of ds, not additive)
+    total_tried = len(ds)
     output_path = Path(args.output)
     if output_path.exists():
         raw_lines = [
