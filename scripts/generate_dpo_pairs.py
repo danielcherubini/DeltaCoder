@@ -223,11 +223,12 @@ def main():
 
                 f.write(json.dumps(pair) + "\n")
 
-                # Update checkpoint
-                checkpoint[problem_id] = {
-                    "status": "complete",
-                    "completed_at": time.time(),
-                }
+                # Checkpoint on success, failures get reprocessed on resume - acceptable for now
+                if passes and fails:
+                    checkpoint[problem_id] = {
+                        "status": "complete",
+                        "completed_at": time.time(),
+                    }
 
                 # Save checkpoint every 100 problems
                 if len(checkpoint) % 100 == 0:

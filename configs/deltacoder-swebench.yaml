@@ -1,0 +1,9 @@
+model:
+  model_name: "openai/deltacoder"
+  model_kwargs:
+    api_base: "http://romulus:11434/v1"
+    api_key: "sk-none"
+    temperature: 0.6
+    drop_params: true
+    parallel_tool_calls: true
+  cost_tracking: "ignore_errors"
