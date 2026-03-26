@@ -68,18 +68,6 @@ def parse_args():
         action="store_true",
         help="Skip the inference sanity check (not recommended)",
     )
-    parser.add_argument(
-        "--terminal-bench-path",
-        type=str,
-        default="/home/daniel/Coding/AI/terminal-bench-2",
-        help="Path to Terminal-Bench repository",
-    )
-    parser.add_argument(
-        "--jobs-dir",
-        type=str,
-        default="/home/daniel/Coding/AI/terminal-bench-2/jobs",
-        help="Path to Terminal-Bench jobs directory",
-    )
     return parser.parse_args()
 
 
@@ -223,35 +211,33 @@ def main():
     # ---------- Done ----------
     print("\n=== Done! ===")
     run(f"ls -lh {gguf_dir}/*.gguf", check=False)
-
-
-print(f"""
+    print(f"""
 Next steps:
   1. Download GGUFs from the cloud box:
-        rsync -avP <GGUF_DIR>/*.gguf user@host:/path/to/local/
+       rsync -avP {gguf_dir}/*.gguf user@host:/path/to/local/
 
   2. Test locally with ik_llama:
-        ./ik_llama-server -m <GGUF_DIR>/DeltaCoder-9B-v1.1-DPO-Q4_K_M.gguf \\
-            -ngl 999 -c 4096 -fa 1 --jinja --port 8080
+       ./ik_llama-server -m {gguf_dir}/DeltaCoder-9B-v1.1-DPO-Q4_K_M.gguf \\
+           -ngl 999 -c 4096 -fa 1 --jinja --port 8080
 
   3. Run Terminal-Bench eval:
-        OPENAI_API_KEY=sk-none harbor run \\
-            --path <TERMINAL_BENCH_PATH> \\
-            --task-name fix-git --task-name cobol-modernization \\
-            --task-name overfull-hbox --task-name prove-plus-comm \\
-            --agent terminus-2 --model openai/deltacoder \\
-            --ak api_base=http://romulus:11434/v1 --ak temperature=0.6 \\
-            --ak 'model_info={"max_input_tokens":65536,"max_output_tokens":8192,"input_cost_per_token":0,"output_cost_per_token":0,"litellm_provider":"openai","mode":"chat"}' \\
-            --ae GIT_PAGER=cat --ae GIT_EDITOR=true --ae GIT_SEQUENCE_EDITOR=true \\
-            --ek GIT_PAGER=cat --ek GIT_EDITOR=true --ek GIT_SEQUENCE_EDITOR=true \\
-            --env docker -n 1 --job-name deltacoder-v1.1-dpo-eval \\
-            --jobs-dir <JOBS_DIR>
+       OPENAI_API_KEY=sk-none harbor run \\
+           --path /home/daniel/Coding/AI/terminal-bench-2 \\
+           --task-name fix-git --task-name cobol-modernization \\
+           --task-name overfull-hbox --task-name prove-plus-comm \\
+           --agent terminus-2 --model openai/deltacoder \\
+           --ak api_base=http://romulus:11434/v1 --ak temperature=0.6 \\
+           --ak 'model_info={{"max_input_tokens":65536,"max_output_tokens":8192,"input_cost_per_token":0,"output_cost_per_token":0,"litellm_provider":"openai","mode":"chat"}}' \\
+           --ae GIT_PAGER=cat --ae GIT_EDITOR=true --ae GIT_SEQUENCE_EDITOR=true \\
+           --ek GIT_PAGER=cat --ek GIT_EDITOR=true --ek GIT_SEQUENCE_EDITOR=true \\
+           --env docker -n 1 --job-name deltacoder-v1.1-dpo-eval \\
+           --jobs-dir /home/daniel/Coding/AI/terminal-bench-2/jobs
 
   4. Push to HuggingFace:
-        huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF \\
-            <GGUF_DIR>/ --repo-type model
-        huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B \\
-            <ADAPTER_DIR>/ --repo-type model
+       huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF \\
+           {gguf_dir}/ --repo-type model
+       huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B \\
+           {args.adapter}/ --repo-type model
 """)
 
 
