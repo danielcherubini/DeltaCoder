@@ -5,3 +5,4 @@ data/
 last_run_prepared/
 outputs/
 *.gguf
+configs/
