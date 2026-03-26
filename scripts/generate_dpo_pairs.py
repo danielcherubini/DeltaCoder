@@ -190,7 +190,7 @@ def main():
             for choice in completions:
                 text = choice.message.content
                 code = parse_python_code(text)
-                passed, error = execute_code(code, problem["tests"])
+                passed, _error = execute_code(code, problem["tests"])
                 results.append((passed, text, code))
 
             # Check if we have ≥1 pass AND ≥1 fail
@@ -200,7 +200,8 @@ def main():
             if passes and fails:
                 # chosen = passing completion with fewest characters (shortest)
                 # rejected = random failing completion
-                chosen = min(passes, key=lambda x: len(x[0]))[0]
+                # Choose shortest by extracted code length (x[1]), store full response text (x[0])
+                chosen = min(passes, key=lambda x: len(x[1]))[0]
                 rejected = fails[np.random.randint(len(fails))][0]
 
                 # Format as conversational JSONL
@@ -232,7 +233,9 @@ def main():
     total_tried = len(ds) + len(checkpoint)
     output_path = Path(args.output)
     if output_path.exists():
-        raw_lines = [l for l in output_path.read_text().splitlines() if l.strip()]
+        raw_lines = [
+            line for line in output_path.read_text().splitlines() if line.strip()
+        ]
         pairs_kept = len(raw_lines)
     else:
         raw_lines = []
@@ -254,7 +257,7 @@ def main():
     else:
         p50 = p90 = p99 = 0
 
-    print(f"\nStats:")
+    print("\nStats:")
     print(f"  Total problems tried: {total_tried}")
     print(f"  Pairs kept: {pairs_kept}")
     print(f"  Keep rate: {keep_rate:.1f}%")

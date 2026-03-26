@@ -164,7 +164,7 @@ def main():
     n_steps = args.max_steps if args.max_steps > 0 else "full epoch"
     print(f"Starting DPO training ({len(dataset)} pairs, {n_steps} steps)...")
     print(f"  LR: 5e-6  |  beta: 0.1  |  effective batch: 16  |  r: {LORA_R}")
-    print(f"  Watch: rewards/chosen should increase, rewards/rejected should decrease")
+    print("  Watch: rewards/chosen should increase, rewards/rejected should decrease")
 
     trainer_stats = trainer.train()
 

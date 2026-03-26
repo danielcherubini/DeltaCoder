@@ -1,144 +1,83 @@
-# DeltaCoder-9B DPO Configuration
-# Documentation and reference for DPO training hyperparameters
+# DeltaCoder v1.1-DPO — Hyperparameter Reference
+# This file documents the DPO training configuration.
+# The actual hyperparameters live in scripts/train_dpo.py.
 
-# ==================== Model Information ====================
 model:
-  name: "danielcherubini/Qwen3.5-DeltaCoder-9B"
-  description: "Merged v1 model from HuggingFace, trained with SFT using Unsloth + TRL SFTTrainer"
-  type: "Qwen3.5-9B distilled model with DeltaCoder enhancements"
+  # The merged v1 model (SFT-trained, published on HuggingFace).
+  # DPO trains ON TOP of this — not on the base Jackrong model.
+  name: danielcherubini/Qwen3.5-DeltaCoder-9B
+  max_seq_length: 4096
+  # QLoRA not recommended for Qwen3.5 (accuracy loss from GDN kernels)
+  precision: bf16
 
-# ==================== DPOConfig Hyperparameters ====================
-dpo_config:
-  beta: 0.1
-    description: "Preference learning strength. Lower values give more weight to the loss function.
-      0.1 is a standard value for DPO that balances preference learning with language modeling.
-      Higher values can lead to overfitting on preferences."
-
-  loss_type: "sigmoid"
-    description: "Loss function for DPO. Sigmoid is the default and most commonly used.
-      Other options include hinge and ipo for different preference learning objectives."
-
-  max_length: 4096
-    description: "Maximum sequence length for training. Matches the model's context window.
-      Set to 4096 to utilize the full context for longer reasoning traces."
-
-  max_prompt_length: 1024
-    description: "Maximum prompt length before model generation. Limits how much context
-      the model can see before generating responses, reducing memory usage."
-
-  per_device_train_batch_size: 1
-    description: "Batch size per GPU. Set to 1 for DPO to minimize memory usage since
-      DPO uses implicit reference modeling which is memory-efficient."
-
-  gradient_accumulation_steps: 16
-    description: "Accumulate gradients across 16 steps before optimizer update.
-      Allows smaller batch sizes while maintaining training stability."
-
-  num_train_epochs: 1
-    description: "Number of full passes through the dataset. For DPO we typically use
-      1 epoch since we want to avoid overfitting to the preference data."
-
-  learning_rate: 5e-6
-    description: "Learning rate for DPO training. DPO requires much lower learning rates
-      than SFT (1e-4) because DPO is a preference optimization task, not
-      standard supervised fine-tuning. 5e-6 is a safe starting point."
-
-  lr_scheduler_type: "cosine"
-    description: "Cosine annealing scheduler for smooth learning rate decay.
-      Works well with warmup_ratio=0.1 to start slowly and decay smoothly."
-
-  warmup_ratio: 0.1
-    description: "Warmup for the first 10% of training. Helps stabilize early training.
-      Lower warmup than SFT since DPO is more stable with small batches."
-
-  bf16: true
-    description: "Use bfloat16 precision for training. Provides better numerical stability
-      than float16 on modern GPUs while maintaining performance."
-
-  optim: "adamw_torch"
-    description: "AdamW optimizer with PyTorch implementation. Standard choice for DPO."
-
-  logging_steps: 5
-    description: "Log metrics every 5 steps for monitoring training progress."
-
-  save_strategy: "steps"
-    description: "Save checkpoints based on training steps rather than epochs.
-      Better for DPO since we want to monitor progress during training."
-
-  save_steps: 0.5
-    description: "Save a checkpoint every 0.5 epochs. For a 1-epoch DPO run this means
-      saving at the midpoint and end of training."
-
-  save_total_limit: 2
-    description: "Keep only the last 2 checkpoint directories. Prevents disk space issues
-      during long training runs."
-
-  output_dir: "./outputs/deltacoder-9b-dpo"
-    description: "Output directory for model checkpoints and training logs."
-
-  seed: 3407
-    description: "Random seed for reproducibility. Matches the SFT training seed."
-
-  report_to: "none"
-    description: "Disable wandb/MLflow reporting to reduce overhead during training."
-
-# ==================== LoRA Hyperparameters ====================
 lora:
+  # Half of v1's r=64 — DPO needs less capacity than SFT
   r: 32
-    description: "LoRA rank. Controls the dimensionality of the low-rank adaptation.
-      r=32 is a good balance between model capacity and memory usage."
-
+  # alpha = r is standard
   lora_alpha: 32
-    description: "LoRA scaling factor. alpha=r means no additional scaling needed.
-      This matches the SFT training configuration for consistency."
-
+  # Unsloth-optimised
   lora_dropout: 0
-    description: "Dropout rate for LoRA layers. Set to 0 since we're fine-tuning
-      on preference data which is already relatively clean."
+  bias: none
+  # Proven target_modules from v1 — the GDN projections are critical.
+  # Qwen3.5 has 32 layers: 8 full attention + 24 GDN.
+  # Omitting in_proj_* leaves 75% of attention layers untrained.
+  target_modules:
+    # Full Attention (8 layers)
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # GDN / Gated DeltaNet (24 layers)
+    - in_proj_qkv
+    - in_proj_z
+    - in_proj_b
+    - in_proj_a
+    - out_proj
+    # MLP (all 32 layers)
+    - gate_proj
+    - up_proj
+    - down_proj
 
-  bias: "none"
-    description: "Dont apply LoRA to bias terms. Standard practice for DPO."
+dpo:
+  # DPO temperature — controls KL divergence penalty from reference.
+  # 0.1 is the standard starting point. Higher = more conservative.
+  beta: 0.1
+  # Standard DPO loss (Bradley-Terry model). Alternatives: ipo, hinge.
+  loss_type: sigmoid
+  # Unsloth implicit reference: uses frozen copy of initial weights.
+  # Saves ~18GB VRAM vs loading a separate reference model.
+  ref_model: null
 
-  use_gradient_checkpointing: "unsloth"
-    description: "Enable gradient checkpointing for memory efficiency.
-      The unsloth variant is optimized for Unsloth's implementation."
+training:
+  # ~20x lower than SFT (1e-4). DPO is very LR-sensitive —
+  # too high causes reward hacking and format collapse.
+  learning_rate: 5e-6
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  # 1 epoch on ~2.5-3.5K pairs is sufficient
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  # Effective batch size = 16
+  gradient_accumulation_steps: 16
+  bf16: true
+  # More numerically stable than adamw_8bit for DPO
+  optim: adamw_torch
+  # Max total (prompt + response) token length
+  max_length: 4096
+  # AceCode-V2 questions rarely exceed 1K tokens
+  max_prompt_length: 1024
 
-  random_state: 3407
-    description: "Random seed for reproducibility. Matches SFT training seed."
+dataset:
+  source: data/dpo_pairs.jsonl
+  # [{role: user, content: ...}] lists — TRL applies chat template automatically
+  format: conversational
+  # From 10K problems x 8 samples at ~50% pass rate
+  expected_pairs: 2500-3500
+  # On-policy — pairs generated from the model we're aligning
+  generation_model: DeltaCoder-9B-Q4_K_M
 
-# ==================== Target Modules ====================
-target_modules:
-  description: "Full modules for both standard attention and GDN (Gated Delta Normalization).
-    These were proven effective in v1 SFT training."
-
-  modules:
-    - "q_proj"      # Query projection in attention
-    - "k_proj"      # Key projection in attention
-    - "v_proj"      # Value projection in attention
-    - "o_proj"      # Output projection in attention
-    - "in_proj_qkv" # Combined Q,K,V projections in GDN
-    - "in_proj_z"   # Z gate projection in GDN
-    - "in_proj_b"   # B gate projection in GDN
-    - "in_proj_a"   # A gate projection in GDN
-    - "out_proj"    # Output projection in GDN
-    - "gate_proj"   # Gate projection in MLP
-    - "up_proj"     # Up projection in MLP
-    - "down_proj"   # Down projection in MLP
-
-# ==================== Key Design Decisions ====================
-design_decisions:
-  ref_model: None
-    description: "Dont explicitly load a reference model. Unsloth handles implicit
-      reference modeling internally, saving significant VRAM."
-
-  load_in_4bit: false
-    description: "Load model in 16-bit precision rather than 4-bit for DPO.
-      DPO benefits from higher precision for stable preference learning."
-
-  trust_remote_code: true
-    description: "Enable remote code execution for model loading. Required for
-      some HuggingFace models with custom implementations."
-
-  dataset_format: "conversational"
-    description: "Dataset is in conversational format with prompt/chosen/rejected lists.
-      TRL applies the chat template automatically during training."
+evaluation:
+  # Compare before/after on:
+  # - HumanEval (baseline v1: 50.6% temp=0.6, 43.9% greedy)
+  # - Terminal-Bench easy 4 tasks (baseline v1: 50% with env fixes)
+  # Success criterion: HumanEval greedy improves toward sampled score
