@@ -61,12 +61,16 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
             combined_code = code + "\n\n" + "\n".join(tests)
             tmpfile.write_text(combined_code)
 
-            # Run the code
+            # Run the code using the same Python interpreter that's running this script,
+            # and inherit the environment (with PATH preserved) rather than stripping it,
+            # so PYTHONHOME/PYTHONPATH remain available.
+            env = os.environ.copy()
+            env["PATH"] = "/usr/bin:/usr/local/bin"
             result = subprocess.run(
-                ["python", str(tmpfile)],
+                [sys.executable, str(tmpfile)],
                 timeout=10,
                 cwd=tmpdir,
-                env={"PATH": "/usr/bin:/usr/local/bin"},
+                env=env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
             )
@@ -85,8 +89,6 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
         return False, "timeout"
     except Exception as e:
         return False, str(e)
-
-    return False, "unknown error"
 
 
 def call_api(
@@ -162,8 +164,9 @@ def main():
     if Path(checkpoint_file).exists():
         with open(checkpoint_file, "r") as f:
             checkpoint = json.load(f)
-        print(f"Resuming from checkpoint: {len(checkpoint)} problems processed")
-        ds = ds.select(range(len(checkpoint), len(ds)))
+        print(f"Resuming from checkpoint: {len(checkpoint)} problems already processed")
+    # Note: we iterate all of ds and skip via checkpoint dict — do NOT slice ds,
+    # because some early problems may have been skipped (API error) and need retry.
 
     # Output file
     with open(args.output, "a", encoding="utf-8") as f:
