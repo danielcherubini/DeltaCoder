@@ -1,0 +1,17 @@
+# DeltaCoder v1.1-DPO — Python dependencies
+#
+# Pair generation (local, scripts/generate_dpo_pairs.py):
+openai>=1.0.0
+datasets>=2.0.0
+tqdm>=4.0.0
+numpy>=1.24.0
+#
+# DPO training (cloud, scripts/train_dpo.py):
+# unsloth is installed separately via:
+#   pip install "unsloth[cu124-torch260] @ git+https://github.com/unslothai/unsloth.git"
+# flash-linear-attention must be installed before unsloth for Qwen3.5:
+#   pip install flash-linear-attention==0.4.1
+trl>=0.19.0   # processing_class= argument in DPOTrainer requires >= 0.19
+#
+# GGUF export (cloud, scripts/merge_and_export_dpo.py):
+peft>=0.10.0

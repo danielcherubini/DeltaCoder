@@ -204,9 +204,8 @@ def main():
             fails = [(t, c) for p, t, c in results if not p]
 
             if passes and fails:
-                # chosen = passing completion with fewest characters (shortest)
-                # rejected = random failing completion
-                # Choose shortest by extracted code length (x[1]), store full response text (x[0])
+                # chosen = passing completion with shortest extracted code (by character count)
+                # x[0] = full response text, x[1] = extracted code; sort by x[1] length
                 chosen = min(passes, key=lambda x: len(x[1]))[0]
                 rejected = fails[np.random.randint(len(fails))][0]
 
@@ -249,18 +248,19 @@ def main():
         pairs_kept = 0
     keep_rate = (pairs_kept / total_tried * 100) if total_tried > 0 else 0
 
-    # Calculate token lengths
+    # Calculate approximate word counts (whitespace split — proxy for token length;
+    # use these to inform max_length in train_dpo.py, not as exact token counts)
     if pairs_kept > 0:
-        token_lengths = []
+        word_lengths = []
         for line in raw_lines:
             pair = json.loads(line)
             combined = pair["chosen"][0]["content"] + pair["rejected"][0]["content"]
-            token_lengths.append(len(combined.split()))
+            word_lengths.append(len(combined.split()))
 
-        token_lengths.sort()
-        p50 = token_lengths[int(len(token_lengths) * 0.5)] if token_lengths else 0
-        p90 = token_lengths[int(len(token_lengths) * 0.9)] if token_lengths else 0
-        p99 = token_lengths[int(len(token_lengths) * 0.99)] if token_lengths else 0
+        word_lengths.sort()
+        p50 = word_lengths[int(len(word_lengths) * 0.5)] if word_lengths else 0
+        p90 = word_lengths[int(len(word_lengths) * 0.9)] if word_lengths else 0
+        p99 = word_lengths[int(len(word_lengths) * 0.99)] if word_lengths else 0
     else:
         p50 = p90 = p99 = 0
 
@@ -268,7 +268,7 @@ def main():
     print(f"  Total problems tried: {total_tried}")
     print(f"  Pairs kept: {pairs_kept}")
     print(f"  Keep rate: {keep_rate:.1f}%")
-    print(f"  Token length p50/p90/p99: {p50}/{p90}/{p99}")
+    print(f"  Word count p50/p90/p99 (approx token proxy): {p50}/{p90}/{p99}")
 
 
 if __name__ == "__main__":
