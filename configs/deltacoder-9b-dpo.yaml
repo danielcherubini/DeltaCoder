@@ -1,0 +1,144 @@
+# DeltaCoder-9B DPO Configuration
+# Documentation and reference for DPO training hyperparameters
+
+# ==================== Model Information ====================
+model:
+  name: "danielcherubini/Qwen3.5-DeltaCoder-9B"
+  description: "Merged v1 model from HuggingFace, trained with SFT using Unsloth + TRL SFTTrainer"
+  type: "Qwen3.5-9B distilled model with DeltaCoder enhancements"
+
+# ==================== DPOConfig Hyperparameters ====================
+dpo_config:
+  beta: 0.1
+    description: "Preference learning strength. Lower values give more weight to the loss function.
+      0.1 is a standard value for DPO that balances preference learning with language modeling.
+      Higher values can lead to overfitting on preferences."
+
+  loss_type: "sigmoid"
+    description: "Loss function for DPO. Sigmoid is the default and most commonly used.
+      Other options include hinge and ipo for different preference learning objectives."
+
+  max_length: 4096
+    description: "Maximum sequence length for training. Matches the model's context window.
+      Set to 4096 to utilize the full context for longer reasoning traces."
+
+  max_prompt_length: 1024
+    description: "Maximum prompt length before model generation. Limits how much context
+      the model can see before generating responses, reducing memory usage."
+
+  per_device_train_batch_size: 1
+    description: "Batch size per GPU. Set to 1 for DPO to minimize memory usage since
+      DPO uses implicit reference modeling which is memory-efficient."
+
+  gradient_accumulation_steps: 16
+    description: "Accumulate gradients across 16 steps before optimizer update.
+      Allows smaller batch sizes while maintaining training stability."
+
+  num_train_epochs: 1
+    description: "Number of full passes through the dataset. For DPO we typically use
+      1 epoch since we want to avoid overfitting to the preference data."
+
+  learning_rate: 5e-6
+    description: "Learning rate for DPO training. DPO requires much lower learning rates
+      than SFT (1e-4) because DPO is a preference optimization task, not
+      standard supervised fine-tuning. 5e-6 is a safe starting point."
+
+  lr_scheduler_type: "cosine"
+    description: "Cosine annealing scheduler for smooth learning rate decay.
+      Works well with warmup_ratio=0.1 to start slowly and decay smoothly."
+
+  warmup_ratio: 0.1
+    description: "Warmup for the first 10% of training. Helps stabilize early training.
+      Lower warmup than SFT since DPO is more stable with small batches."
+
+  bf16: true
+    description: "Use bfloat16 precision for training. Provides better numerical stability
+      than float16 on modern GPUs while maintaining performance."
+
+  optim: "adamw_torch"
+    description: "AdamW optimizer with PyTorch implementation. Standard choice for DPO."
+
+  logging_steps: 5
+    description: "Log metrics every 5 steps for monitoring training progress."
+
+  save_strategy: "steps"
+    description: "Save checkpoints based on training steps rather than epochs.
+      Better for DPO since we want to monitor progress during training."
+
+  save_steps: 0.5
+    description: "Save a checkpoint every 0.5 epochs. For a 1-epoch DPO run this means
+      saving at the midpoint and end of training."
+
+  save_total_limit: 2
+    description: "Keep only the last 2 checkpoint directories. Prevents disk space issues
+      during long training runs."
+
+  output_dir: "./outputs/deltacoder-9b-dpo"
+    description: "Output directory for model checkpoints and training logs."
+
+  seed: 3407
+    description: "Random seed for reproducibility. Matches the SFT training seed."
+
+  report_to: "none"
+    description: "Disable wandb/MLflow reporting to reduce overhead during training."
+
+# ==================== LoRA Hyperparameters ====================
+lora:
+  r: 32
+    description: "LoRA rank. Controls the dimensionality of the low-rank adaptation.
+      r=32 is a good balance between model capacity and memory usage."
+
+  lora_alpha: 32
+    description: "LoRA scaling factor. alpha=r means no additional scaling needed.
+      This matches the SFT training configuration for consistency."
+
+  lora_dropout: 0
+    description: "Dropout rate for LoRA layers. Set to 0 since we're fine-tuning
+      on preference data which is already relatively clean."
+
+  bias: "none"
+    description: "Dont apply LoRA to bias terms. Standard practice for DPO."
+
+  use_gradient_checkpointing: "unsloth"
+    description: "Enable gradient checkpointing for memory efficiency.
+      The unsloth variant is optimized for Unsloth's implementation."
+
+  random_state: 3407
+    description: "Random seed for reproducibility. Matches SFT training seed."
+
+# ==================== Target Modules ====================
+target_modules:
+  description: "Full modules for both standard attention and GDN (Gated Delta Normalization).
+    These were proven effective in v1 SFT training."
+
+  modules:
+    - "q_proj"      # Query projection in attention
+    - "k_proj"      # Key projection in attention
+    - "v_proj"      # Value projection in attention
+    - "o_proj"      # Output projection in attention
+    - "in_proj_qkv" # Combined Q,K,V projections in GDN
+    - "in_proj_z"   # Z gate projection in GDN
+    - "in_proj_b"   # B gate projection in GDN
+    - "in_proj_a"   # A gate projection in GDN
+    - "out_proj"    # Output projection in GDN
+    - "gate_proj"   # Gate projection in MLP
+    - "up_proj"     # Up projection in MLP
+    - "down_proj"   # Down projection in MLP
+
+# ==================== Key Design Decisions ====================
+design_decisions:
+  ref_model: None
+    description: "Dont explicitly load a reference model. Unsloth handles implicit
+      reference modeling internally, saving significant VRAM."
+
+  load_in_4bit: false
+    description: "Load model in 16-bit precision rather than 4-bit for DPO.
+      DPO benefits from higher precision for stable preference learning."
+
+  trust_remote_code: true
+    description: "Enable remote code execution for model loading. Required for
+      some HuggingFace models with custom implementations."
+
+  dataset_format: "conversational"
+    description: "Dataset is in conversational format with prompt/chosen/rejected lists.
+      TRL applies the chat template automatically during training."
