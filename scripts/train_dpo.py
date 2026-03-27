@@ -16,50 +16,59 @@ from unsloth import FastVisionModel, PatchDPOTrainer
 
 PatchDPOTrainer()
 
-# Patch the Unsloth DPO cache to handle text-only datasets.
-# Qwen3.5 is a VLM so Unsloth generates a vision code path that requires
-# an "images" key. We patch it out before DPOTrainer is instantiated.
-import os, pathlib
-
-_cache_file = pathlib.Path("unsloth_compiled_cache/UnslothDPOTrainer.py")
-if _cache_file.exists():
-    _content = _cache_file.read_text()
-    _old = 'processed_features = processor(images=features["images"], text=features["prompt"], add_special_tokens=False)'
-    _new = 'processed_features = tokenizer(text=features["prompt"], add_special_tokens=False)'
-    if _old in _content:
-        _cache_file.write_text(_content.replace(_old, _new))
-        print("Patched UnslothDPOTrainer for text-only dataset")
-
 import argparse
 import json
+import pathlib
 from datasets import Dataset
 from trl import DPOTrainer, DPOConfig
+
+
+# ---------- Patch UnslothDPOTrainer for text-only DPO ----------
+# Qwen3.5 is a VLM so Unsloth generates a vision code path in the DPO trainer.
+# The cache file is now written by the DPOTrainer import above — patch it now
+# before DPOTrainer is instantiated.
+def _patch_unsloth_dpo_cache():
+    cache_file = pathlib.Path("unsloth_compiled_cache/UnslothDPOTrainer.py")
+    if not cache_file.exists():
+        print("WARNING: UnslothDPOTrainer cache not found, skipping patch")
+        return
+
+    content = cache_file.read_text()
+    patches = {
+        # Remove images= arg from processor call
+        'processed_features = processor(images=features["images"], text=features["prompt"], add_special_tokens=False)': 'processed_features = tokenizer(features["prompt"], add_special_tokens=False)',
+        # Remove pixel_values extraction
+        'pixel_values = processed_features["pixel_values"][0]': "pixel_values = None  # text-only DPO",
+        # Remove pixel_values from return dict
+        '"pixel_values": pixel_values,': '# "pixel_values": pixel_values,  # text-only DPO',
+    }
+
+    patched = False
+    for old, new in patches.items():
+        if old in content:
+            content = content.replace(old, new)
+            patched = True
+
+    if patched:
+        cache_file.write_text(content)
+        # Delete pycache so Python uses the patched .py file
+        import shutil
+
+        pycache = pathlib.Path("unsloth_compiled_cache/__pycache__")
+        if pycache.exists():
+            shutil.rmtree(pycache)
+        print("Patched UnslothDPOTrainer for text-only DPO")
+    else:
+        print("UnslothDPOTrainer already patched or pattern not found")
+
+
+_patch_unsloth_dpo_cache()
 
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
 MAX_SEQ_LENGTH = 4096
 LORA_R = 32
 LORA_ALPHA = 32
-
-# Proven LoRA target_modules from v1 — includes GDN projections.
-# Omitting the GDN projections would leave 75% of attention layers untrained.
-LORA_TARGET_MODULES = [
-    # Full Attention
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    # GDN (Gated DeltaNet) — Qwen3.5-specific, 24/32 layers use this architecture
-    "in_proj_qkv",
-    "in_proj_z",
-    "in_proj_b",
-    "in_proj_a",
-    "out_proj",
-    # MLP
-    "gate_proj",
-    "up_proj",
-    "down_proj",
-]
 
 
 def parse_args():
@@ -86,11 +95,7 @@ def parse_args():
 
 
 def load_dpo_dataset(path: str) -> Dataset:
-    """Load conversational-format JSONL into a HuggingFace Dataset.
-
-    Each line should have: prompt, chosen, rejected as lists of role/content dicts.
-    TRL's DPOTrainer handles chat template application automatically.
-    """
+    """Load conversational-format JSONL into a HuggingFace Dataset."""
     records = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -109,18 +114,17 @@ def main():
     model, tokenizer = FastVisionModel.from_pretrained(
         model_name=MODEL_NAME,
         max_seq_length=MAX_SEQ_LENGTH,
-        load_in_4bit=False,  # QLoRA not recommended for Qwen3.5 (accuracy loss)
-        load_in_16bit=True,  # bf16 LoRA
+        load_in_4bit=False,
+        load_in_16bit=True,
         full_finetuning=False,
         trust_remote_code=True,
     )
 
     # ---------- LoRA ----------
-    # finetune_vision_layers=False: text-only DPO, skip vision encoder
     print("Applying LoRA (r=32)...")
     model = FastVisionModel.get_peft_model(
         model,
-        finetune_vision_layers=False,  # text-only — no vision data in DPO pairs
+        finetune_vision_layers=False,  # text-only DPO
         finetune_language_layers=True,
         finetune_attention_modules=True,
         finetune_mlp_modules=True,
@@ -137,38 +141,35 @@ def main():
     dataset = load_dpo_dataset(args.data)
 
     # ---------- DPO Config ----------
-    # All DPO-specific params (beta, max_length, loss_type) go in DPOConfig,
-    # NOT as separate DPOTrainer kwargs (that was the old TRL <= 0.12 API).
     dpo_config_kwargs = dict(
-        beta=0.1,  # DPO temperature — controls divergence from ref
-        loss_type="sigmoid",  # Standard DPO loss
-        max_length=MAX_SEQ_LENGTH,  # Max total (prompt + response) length
-        max_prompt_length=1024,  # Truncate prompts beyond this
+        beta=0.1,
+        loss_type="sigmoid",
+        max_length=MAX_SEQ_LENGTH,
+        max_prompt_length=1024,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,  # Effective batch size = 16
+        gradient_accumulation_steps=16,
         num_train_epochs=1,
-        learning_rate=5e-6,  # ~20x lower than SFT — DPO is LR-sensitive
+        learning_rate=5e-6,
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
         bf16=True,
         optim="adamw_torch",
         logging_steps=5,
         save_strategy="steps",
-        save_steps=0.5,  # Save mid-run checkpoint
+        save_steps=0.5,
         save_total_limit=2,
         output_dir=args.output_dir,
         seed=3407,
         report_to="none",
     )
 
-    # Optionally override with max_steps for quick test runs
     if args.max_steps > 0:
         dpo_config_kwargs["max_steps"] = args.max_steps
 
     dpo_config = DPOConfig(**dpo_config_kwargs)
 
-    # Force a plain AutoTokenizer — FastVisionModel returns a processor for Qwen3.5
-    # which breaks text-only DPO. We need a tokenizer with no image processing.
+    # Use plain tokenizer — FastVisionModel returns a processor for Qwen3.5 VLM
+    # which breaks text-only DPO dataset preparation.
     from transformers import AutoTokenizer
 
     plain_tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
@@ -177,10 +178,10 @@ def main():
     print("Setting up DPO trainer...")
     trainer = DPOTrainer(
         model=model,
-        ref_model=None,  # Unsloth implicit reference (frozen init weights)
+        ref_model=None,
         args=dpo_config,
         train_dataset=dataset,
-        processing_class=plain_tokenizer,  # plain tokenizer, not vision processor
+        processing_class=plain_tokenizer,
     )
 
     # ---------- Train ----------
