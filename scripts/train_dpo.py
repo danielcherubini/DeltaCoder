@@ -99,6 +99,7 @@ def main():
         load_in_16bit=True,  # bf16 LoRA
         full_finetuning=False,
         trust_remote_code=True,
+        vision_model=False,  # text-only, prevent multimodal processor being used
     )
 
     # ---------- LoRA ----------
