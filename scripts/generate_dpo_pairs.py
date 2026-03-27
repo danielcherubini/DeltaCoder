@@ -4,9 +4,12 @@ Downloads a configurable subset of AceCode-V2-122K from HuggingFace, shuffles an
 n-problems rows, then calls DeltaCoder API to generate n-samples completions per problem.
 Executes each completion against test cases, keeping problems where ≥1 pass AND ≥1 fail.
 Formats kept pairs as conversational JSONL.
+
+Uses async HTTP to send multiple problems concurrently, keeping vLLM fully saturated.
 """
 
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -18,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import openai
+import aiohttp
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
@@ -31,14 +34,12 @@ def parse_python_code(text: str) -> str:
     Otherwise strip leading/trailing whitespace and use as-is.
     Strip any remaining ``` markers.
     """
-    # Match first ```python ... ``` block
     pattern = re.compile(r"```python\s*\n(.*?)\n\s*```", re.DOTALL)
     match = pattern.search(text)
 
     if match:
         return match.group(1).strip()
 
-    # Fallback: strip whitespace and remove any remaining ``` markers
     cleaned = text.strip()
     cleaned = re.sub(r"```\s*", "", cleaned)
     cleaned = re.sub(r"\s*```", "", cleaned)
@@ -57,13 +58,9 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
         tmpfile = tmpdir / "test_code.py"
 
         try:
-            # Write combined code to temp file
             combined_code = code + "\n\n" + "\n".join(tests)
             tmpfile.write_text(combined_code)
 
-            # Use the same Python interpreter that runs this script.
-            # Copy the environment but strip Python-specific vars so generated code
-            # cannot import from attacker-controlled PYTHONPATH locations.
             env = os.environ.copy()
             env["PATH"] = "/usr/bin:/usr/local/bin"
             for _var in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
@@ -81,7 +78,6 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
             return passed, None
 
         finally:
-            # Always clean up tempdir
             try:
                 shutil.rmtree(tmpdir, ignore_errors=True)
             except Exception:
@@ -93,45 +89,161 @@ def execute_code(code: str, tests: list[str]) -> tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def call_api(
+async def call_api_async(
+    session: aiohttp.ClientSession,
     problem: dict,
     n_samples: int,
     api_base: str,
     model: str,
-    extra_body: Optional[dict] = None,
-) -> list[dict]:
-    """Call DeltaCoder API for n_samples completions.
+) -> list[str]:
+    """Call DeltaCoder API asynchronously for n_samples completions.
 
-    temperature=0.8, max_tokens=1024.
-    Pass extra_body={"enable_thinking": False} to disable Qwen3.5 thinking mode.
-
-    Returns list of completion dicts with 'choices' array.
+    Returns list of completion text strings.
     """
-    client = openai.OpenAI(
-        base_url=api_base,
-        api_key=os.environ.get(
-            "OPENAI_API_KEY", "sk-none"
-        ),  # local inference doesn't need a real key
-    )
+    url = f"{api_base}/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": problem["question"]}],
+        "temperature": 0.8,
+        "max_tokens": 1024,
+        "n": n_samples,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": problem["question"]}],
-            temperature=0.8,
-            max_tokens=1024,
-            n=n_samples,
-            extra_body={
-                **(extra_body or {}),
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-        )
-        return response.choices
-
+        async with session.post(url, json=payload) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                print(f"  API error {resp.status}: {text[:200]}", file=sys.stderr)
+                return []
+            data = await resp.json()
+            return [choice["message"]["content"] for choice in data.get("choices", [])]
     except Exception as e:
-        # Network error, timeout, etc. - skip this problem
         print(f"  API call failed (skipping): {e}", file=sys.stderr)
         return []
+
+
+async def process_problem(
+    session: aiohttp.ClientSession,
+    problem: dict,
+    n_samples: int,
+    api_base: str,
+    model: str,
+    rng: np.random.RandomState,
+) -> Optional[dict]:
+    """Process a single problem: generate completions, execute, return pair or None."""
+    completions = await call_api_async(session, problem, n_samples, api_base, model)
+
+    if not completions:
+        return None
+
+    results = []
+    for text in completions:
+        code = parse_python_code(text)
+        passed, _error = execute_code(code, problem["tests"])
+        results.append((passed, text, code))
+
+    passes = [(t, c) for p, t, c in results if p]
+    fails = [(t, c) for p, t, c in results if not p]
+
+    if not passes or not fails:
+        return None
+
+    chosen = min(passes, key=lambda x: len(x[1]))[0]
+    rejected = fails[rng.randint(len(fails))][0]
+
+    return {
+        "prompt": [{"role": "user", "content": problem["question"]}],
+        "chosen": [{"role": "assistant", "content": chosen}],
+        "rejected": [{"role": "assistant", "content": rejected}],
+    }
+
+
+async def main_async(args):
+    np.random.seed(args.seed)
+    rng = np.random.RandomState(args.seed)
+
+    print("Loading AceCode-V2-122K from HuggingFace...")
+    ds = load_dataset(
+        "TIGER-Lab/AceCode-V2-122K", split="train", trust_remote_code=True
+    )
+    ds = ds.shuffle(seed=args.seed).select(range(min(args.n_problems, len(ds))))
+    print(f"Using {len(ds)} problems")
+
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_file = str(Path(args.output).with_suffix(".checkpoint"))
+
+    checkpoint = {}
+    if Path(checkpoint_file).exists():
+        with open(checkpoint_file, "r") as f:
+            checkpoint = json.load(f)
+        print(f"Resuming from checkpoint: {len(checkpoint)} problems already processed")
+
+    # Filter out already-processed problems
+    problems = [
+        (i, p)
+        for i, p in enumerate(ds)
+        if (p.get("id") or f"idx-{i}") not in checkpoint
+    ]
+    print(f"Problems remaining: {len(problems)}")
+
+    pairs_written = 0
+    connector = aiohttp.TCPConnector(limit=args.concurrency)
+    timeout = aiohttp.ClientTimeout(total=120)
+
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        with open(args.output, "a", encoding="utf-8") as f:
+            pbar = tqdm(total=len(problems), desc="Processing problems")
+
+            # Process in batches of --concurrency
+            for batch_start in range(0, len(problems), args.concurrency):
+                batch = problems[batch_start : batch_start + args.concurrency]
+
+                tasks = [
+                    process_problem(
+                        session, problem, args.n_samples, args.api_base, args.model, rng
+                    )
+                    for _, problem in batch
+                ]
+
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for (i, problem), result in zip(batch, results):
+                    problem_id = problem.get("id") or f"idx-{i}"
+
+                    if isinstance(result, Exception):
+                        print(
+                            f"  Problem {problem_id} failed: {result}", file=sys.stderr
+                        )
+                    elif result is not None:
+                        f.write(json.dumps(result) + "\n")
+                        f.flush()
+                        pairs_written += 1
+                        checkpoint[problem_id] = {
+                            "status": "complete",
+                            "completed_at": time.time(),
+                        }
+
+                    pbar.update(1)
+
+                # Save checkpoint every batch
+                if len(checkpoint) % 100 == 0:
+                    with open(checkpoint_file, "w") as cf:
+                        json.dump(checkpoint, cf)
+
+            pbar.close()
+
+    # Final checkpoint save
+    with open(checkpoint_file, "w") as cf:
+        json.dump(checkpoint, cf)
+
+    total_tried = len(problems)
+    keep_rate = (pairs_written / total_tried * 100) if total_tried > 0 else 0
+
+    print("\nStats:")
+    print(f"  Total problems tried: {total_tried}")
+    print(f"  Pairs kept: {pairs_written}")
+    print(f"  Keep rate: {keep_rate:.1f}%")
 
 
 def main():
@@ -148,140 +260,12 @@ def main():
         "--output", type=str, default="data/dpo_pairs.jsonl", help="Output file"
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--concurrency", type=int, default=32, help="Number of concurrent requests"
+    )
     args = parser.parse_args()
 
-    # Set random seed
-    np.random.seed(args.seed)
-
-    # Load dataset
-    print("Loading AceCode-V2-122K from HuggingFace...")
-    ds = load_dataset(
-        "TIGER-Lab/AceCode-V2-122K", split="train", trust_remote_code=True
-    )
-
-    # Shuffle and take n-problems rows
-    ds = ds.shuffle(seed=args.seed).select(range(min(args.n_problems, len(ds))))
-    print(f"Using {len(ds)} problems")
-
-    # Create output directory
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-
-    # Checkpoint file
-    checkpoint_file = str(Path(args.output).with_suffix(".checkpoint"))
-
-    # Load checkpoint if exists
-    checkpoint = {}
-    if Path(checkpoint_file).exists():
-        with open(checkpoint_file, "r") as f:
-            checkpoint = json.load(f)
-        print(f"Resuming from checkpoint: {len(checkpoint)} problems already processed")
-    # Note: we iterate all of ds and skip via checkpoint dict — do NOT slice ds,
-    # because some early problems may have been skipped (API error) and need retry.
-
-    # Output file
-    with open(args.output, "a", encoding="utf-8") as f:
-        for i, problem in enumerate(tqdm(ds, desc="Processing problems")):
-            # Fallback to index-based id if dataset row has no "id" field
-            problem_id = problem.get("id") or f"idx-{i}"
-            if problem_id in checkpoint:
-                continue
-
-            # Call API for n-samples completions
-            completions = call_api(
-                problem,
-                n_samples=args.n_samples,
-                api_base=args.api_base,
-                model=args.model,
-                extra_body={"enable_thinking": False},
-            )
-
-            if not completions:
-                continue
-
-            # Execute each completion
-            results = []  # (passed, completion_text, extracted_code)
-
-            for choice in completions:
-                text = choice.message.content
-                code = parse_python_code(text)
-                passed, _error = execute_code(code, problem["tests"])
-                results.append((passed, text, code))
-
-            # Check if we have ≥1 pass AND ≥1 fail
-            passes = [(t, c) for p, t, c in results if p]
-            fails = [(t, c) for p, t, c in results if not p]
-
-            if passes and fails:
-                # chosen = passing completion with shortest extracted code (by character count)
-                # x[0] = full response text, x[1] = extracted code; sort by x[1] length
-                chosen = min(passes, key=lambda x: len(x[1]))[0]
-                rejected = fails[np.random.randint(len(fails))][0]
-
-                # Format as conversational JSONL
-                pair = {
-                    "prompt": [{"role": "user", "content": problem["question"]}],
-                    "chosen": [{"role": "assistant", "content": chosen}],
-                    "rejected": [{"role": "assistant", "content": rejected}],
-                }
-
-                f.write(json.dumps(pair) + "\n")
-
-                # Update checkpoint
-                checkpoint[problem_id] = {
-                    "status": "complete",
-                    "completed_at": time.time(),
-                }
-
-                # Save checkpoint every 100 problems
-                if len(checkpoint) % 100 == 0:
-                    with open(checkpoint_file, "w") as cf:
-                        json.dump(checkpoint, cf)
-                    print(f"Checkpoint saved: {len(checkpoint)} problems")
-
-    # Final checkpoint save
-    with open(checkpoint_file, "w") as cf:
-        json.dump(checkpoint, cf)
-
-    # Print stats
-    # total_tried = full dataset size (checkpoint entries are a subset of ds, not additive)
-    total_tried = len(ds)
-    output_path = Path(args.output)
-    if output_path.exists():
-        raw_lines = [
-            line for line in output_path.read_text().splitlines() if line.strip()
-        ]
-        pairs_kept = len(raw_lines)
-    else:
-        raw_lines = []
-        pairs_kept = 0
-    keep_rate = (pairs_kept / total_tried * 100) if total_tried > 0 else 0
-
-    # Calculate approximate word counts (whitespace split — proxy for token length;
-    # use these to inform max_length in train_dpo.py, not as exact token counts)
-    if pairs_kept > 0:
-        word_lengths = []
-        for line in raw_lines:
-            pair = json.loads(line)
-            combined = pair["chosen"][0]["content"] + pair["rejected"][0]["content"]
-            word_lengths.append(len(combined.split()))
-
-        word_lengths.sort()
-        n = len(word_lengths)
-
-        def _pct(ratio: float) -> int:
-            return word_lengths[max(0, min(n - 1, int(n * ratio)))] if n else 0
-
-        p50 = _pct(0.5)
-        p90 = _pct(0.9)
-        p99 = _pct(0.99)
-    else:
-        p50 = p90 = p99 = 0
-
-    print("\nStats:")
-    print(f"  Total problems tried: {total_tried}")
-    print(f"  Pairs kept: {pairs_kept}")
-    print(f"  Keep rate: {keep_rate:.1f}%")
-    print(f"  Word count p50/p90/p99 (approx token proxy): {p50}/{p90}/{p99}")
+    asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
