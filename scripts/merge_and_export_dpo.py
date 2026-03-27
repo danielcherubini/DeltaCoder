@@ -235,27 +235,11 @@ def main():
         f"--outfile {f16_gguf} --outtype f16"
     )
 
-    # ---------- Step 8: Quantize ----------
+    # ---------- Step 8: Quantize + upload-and-delete each quant ----------
     print("\n=== Step 8: Generating quantized GGUFs ===")
     quantize_bin = f"{args.llama_cpp_dir}/build/bin/llama-quantize"
-    for quant in QUANTS:
-        if quant == "BF16":
-            # BF16 is just the f16 GGUF renamed
-            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-BF16.gguf"
-            run(f"cp {f16_gguf} {out}")
-            continue
-        out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-{quant}.gguf"
-        print(f"  Quantizing {quant}...")
-        run(f"{quantize_bin} {f16_gguf} {out} {quant}")
 
-    # Delete f16 GGUF after quantization to save disk (BF16 copy kept above)
-    print(f"  Removing intermediate f16 GGUF to free disk space...")
-    Path(f16_gguf).unlink(missing_ok=True)
-
-    print("\n=== Done! ===")
-    run(f"ls -lh {gguf_dir}/*.gguf", check=False)
-
-    # ---------- Step 9: Upload to HuggingFace (optional) ----------
+    token = None
     if args.upload:
         token = args.hf_token or os.environ.get("HF_TOKEN")
         if not token:
@@ -265,16 +249,37 @@ def main():
             )
             sys.exit(1)
 
-        print(f"\n=== Step 9: Uploading GGUFs to {HF_GGUF_REPO} ===")
-        run(
-            f"huggingface-cli upload {HF_GGUF_REPO} {gguf_dir}/ --repo-type model --token {token}"
-        )
+    for quant in QUANTS:
+        if quant == "BF16":
+            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-BF16.gguf"
+            run(f"cp {f16_gguf} {out}")
+        else:
+            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-{quant}.gguf"
+            print(f"  Quantizing {quant}...")
+            run(f"{quantize_bin} {f16_gguf} {out} {quant}")
 
-        print(f"\n=== Step 9b: Uploading merged model to {HF_ADAPTER_REPO} ===")
+        # Upload immediately and delete to free disk
+        if args.upload and token:
+            print(f"  Uploading {quant} to HuggingFace...")
+            run(
+                f"huggingface-cli upload {HF_GGUF_REPO} {out} --repo-type model --token {token}"
+            )
+            Path(out).unlink(missing_ok=True)
+            print(f"  Deleted local {quant} GGUF to free disk.")
+
+    # Delete f16 GGUF after all quants done
+    print("  Removing intermediate f16 GGUF...")
+    Path(f16_gguf).unlink(missing_ok=True)
+
+    print("\n=== Done! ===")
+
+    # ---------- Step 9: Upload adapter ----------
+    if args.upload and token:
+        print(f"\n=== Step 9: Uploading DPO adapter to {HF_ADAPTER_REPO} ===")
         run(
             f"huggingface-cli upload {HF_ADAPTER_REPO} {args.dpo_adapter}/ --repo-type model --token {token}"
         )
-        print("\nUpload complete!")
+        print("\nAll uploads complete!")
     else:
         print(f"""
 Next steps:
