@@ -41,6 +41,7 @@ QUANTS = [
     "Q5_K_M",  # 5-bit
     "Q6_K",  # 6-bit
     "Q8_0",  # 8-bit
+    "BF16",  # 16-bit (raw, for high-VRAM users)
 ]
 HF_GGUF_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF"
 HF_ADAPTER_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B"
