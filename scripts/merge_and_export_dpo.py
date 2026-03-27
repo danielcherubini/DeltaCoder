@@ -30,13 +30,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
 QUANTS = [
-    "Q2_K",  # 2-bit
-    "Q3_K_S",
-    "Q3_K_M",
-    "Q3_K_L",  # 3-bit
-    "Q4_K_S",
-    "Q4_0",
-    "Q4_K_M",  # 4-bit
+    # Q2_K, Q3_K_S, Q3_K_M, Q3_K_L, Q4_0, Q4_K_S already uploaded
+    "Q4_K_M",  # 4-bit (recommended)
     "Q5_K_S",
     "Q5_0",
     "Q5_K_M",  # 5-bit
