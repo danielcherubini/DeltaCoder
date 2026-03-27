@@ -235,6 +235,10 @@ def main():
         f"--outfile {f16_gguf} --outtype f16"
     )
 
+    # Delete merged model immediately after f16 conversion — no longer needed
+    print(f"  Removing merged model to free disk ({merged_dir})...")
+    run(f"rm -rf {merged_dir}")
+
     # ---------- Step 8: Quantize + upload-and-delete each quant ----------
     print("\n=== Step 8: Generating quantized GGUFs ===")
     quantize_bin = f"{args.llama_cpp_dir}/build/bin/llama-quantize"
@@ -261,8 +265,14 @@ def main():
         # Upload immediately and delete to free disk
         if args.upload and token:
             print(f"  Uploading {quant} to HuggingFace...")
-            run(
-                f"huggingface-cli upload {HF_GGUF_REPO} {out} --repo-type model --token {token}"
+            from huggingface_hub import HfApi
+
+            api = HfApi(token=token)
+            api.upload_file(
+                path_or_fileobj=out,
+                path_in_repo=Path(out).name,
+                repo_id=HF_GGUF_REPO,
+                repo_type="model",
             )
             Path(out).unlink(missing_ok=True)
             print(f"  Deleted local {quant} GGUF to free disk.")
@@ -276,8 +286,13 @@ def main():
     # ---------- Step 9: Upload adapter ----------
     if args.upload and token:
         print(f"\n=== Step 9: Uploading DPO adapter to {HF_ADAPTER_REPO} ===")
-        run(
-            f"huggingface-cli upload {HF_ADAPTER_REPO} {args.dpo_adapter}/ --repo-type model --token {token}"
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=token)
+        api.upload_folder(
+            folder_path=args.dpo_adapter,
+            repo_id=HF_ADAPTER_REPO,
+            repo_type="model",
         )
         print("\nAll uploads complete!")
     else:
