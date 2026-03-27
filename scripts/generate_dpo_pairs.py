@@ -117,7 +117,10 @@ def call_api(
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": problem["question"]}],
+            messages=[
+                {"role": "system", "content": "/no_think"},
+                {"role": "user", "content": problem["question"]},
+            ],
             temperature=0.8,
             max_tokens=1024,
             n=n_samples,
