@@ -167,6 +167,12 @@ def main():
 
     dpo_config = DPOConfig(**dpo_config_kwargs)
 
+    # Force a plain AutoTokenizer — FastVisionModel returns a processor for Qwen3.5
+    # which breaks text-only DPO. We need a tokenizer with no image processing.
+    from transformers import AutoTokenizer
+
+    plain_tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
     # ---------- Trainer ----------
     print("Setting up DPO trainer...")
     trainer = DPOTrainer(
@@ -174,7 +180,7 @@ def main():
         ref_model=None,  # Unsloth implicit reference (frozen init weights)
         args=dpo_config,
         train_dataset=dataset,
-        processing_class=tokenizer,  # TRL >= 0.19 API (replaces tokenizer=tokenizer)
+        processing_class=plain_tokenizer,  # plain tokenizer, not vision processor
     )
 
     # ---------- Train ----------
