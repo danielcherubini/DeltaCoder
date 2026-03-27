@@ -28,7 +28,9 @@ from unsloth import FastLanguageModel
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
-QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
+QUANTS = ["IQ2_XS", "IQ3_XS", "Q2_K", "Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
+HF_GGUF_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF"
+HF_ADAPTER_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B"
 
 
 def parse_args():
@@ -67,6 +69,17 @@ def parse_args():
         "--skip-sanity",
         action="store_true",
         help="Skip the inference sanity check (not recommended)",
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload GGUFs (including F16) and adapter to HuggingFace after export",
+    )
+    parser.add_argument(
+        "--hf-token",
+        type=str,
+        default=None,
+        help="HuggingFace write token (defaults to HF_TOKEN env var)",
     )
     return parser.parse_args()
 
@@ -211,7 +224,33 @@ def main():
     # ---------- Done ----------
     print("\n=== Done! ===")
     run(f"ls -lh {gguf_dir}/*.gguf", check=False)
-    print(f"""
+
+    # ---------- Step 7: Upload to HuggingFace (optional) ----------
+    if args.upload:
+        import os
+
+        token = args.hf_token or os.environ.get("HF_TOKEN")
+        if not token:
+            print(
+                "\nERROR: --upload requires --hf-token or HF_TOKEN env var",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        print(f"\n=== Step 7: Uploading GGUFs to {HF_GGUF_REPO} ===")
+        run(
+            f"huggingface-cli upload {HF_GGUF_REPO} {gguf_dir}/ "
+            f"--repo-type model --token {token}"
+        )
+
+        print(f"\n=== Step 7b: Uploading adapter to {HF_ADAPTER_REPO} ===")
+        run(
+            f"huggingface-cli upload {HF_ADAPTER_REPO} {args.adapter}/ "
+            f"--repo-type model --token {token}"
+        )
+        print("\nUpload complete!")
+    else:
+        print(f"""
 Next steps:
   1. Download GGUFs from the cloud box:
        rsync -avP {gguf_dir}/*.gguf user@host:/path/to/local/
@@ -222,7 +261,7 @@ Next steps:
 
   3. Run Terminal-Bench eval:
        OPENAI_API_KEY=sk-none harbor run \\
-           --path /home/daniel/Coding/AI/terminal-bench-2 \\
+           --path <TERMINAL_BENCH_PATH> \\
            --task-name fix-git --task-name cobol-modernization \\
            --task-name overfull-hbox --task-name prove-plus-comm \\
            --agent terminus-2 --model openai/deltacoder \\
@@ -231,13 +270,11 @@ Next steps:
            --ae GIT_PAGER=cat --ae GIT_EDITOR=true --ae GIT_SEQUENCE_EDITOR=true \\
            --ek GIT_PAGER=cat --ek GIT_EDITOR=true --ek GIT_SEQUENCE_EDITOR=true \\
            --env docker -n 1 --job-name deltacoder-v1.1-dpo-eval \\
-           --jobs-dir /home/daniel/Coding/AI/terminal-bench-2/jobs
+           --jobs-dir <JOBS_DIR>
 
   4. Push to HuggingFace:
-       huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF \\
-           {gguf_dir}/ --repo-type model
-       huggingface-cli upload danielcherubini/Qwen3.5-DeltaCoder-9B \\
-           {args.adapter}/ --repo-type model
+       python scripts/merge_and_export_dpo.py --upload --hf-token <TOKEN>
+       # or re-run with --upload flag
 """)
 
 
