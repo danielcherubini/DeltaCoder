@@ -124,7 +124,6 @@ def main():
         beta=0.1,  # DPO temperature
         loss_type="sigmoid",  # Standard DPO loss
         max_length=MAX_SEQ_LENGTH,  # Max total (prompt + response) length
-        max_prompt_length=1024,  # Truncate prompts beyond this
         per_device_train_batch_size=1,
         gradient_accumulation_steps=16,  # Effective batch size = 16
         num_train_epochs=1,
