@@ -16,6 +16,20 @@ from unsloth import FastVisionModel, PatchDPOTrainer
 
 PatchDPOTrainer()
 
+# Patch the Unsloth DPO cache to handle text-only datasets.
+# Qwen3.5 is a VLM so Unsloth generates a vision code path that requires
+# an "images" key. We patch it out before DPOTrainer is instantiated.
+import os, pathlib
+
+_cache_file = pathlib.Path("unsloth_compiled_cache/UnslothDPOTrainer.py")
+if _cache_file.exists():
+    _content = _cache_file.read_text()
+    _old = 'processed_features = processor(images=features["images"], text=features["prompt"], add_special_tokens=False)'
+    _new = 'processed_features = tokenizer(text=features["prompt"], add_special_tokens=False)'
+    if _old in _content:
+        _cache_file.write_text(_content.replace(_old, _new))
+        print("Patched UnslothDPOTrainer for text-only dataset")
+
 import argparse
 import json
 from datasets import Dataset
