@@ -12,7 +12,7 @@ Usage:
 """
 
 # IMPORTANT: PatchDPOTrainer must be called BEFORE importing DPOTrainer from trl
-from unsloth import FastLanguageModel, PatchDPOTrainer
+from unsloth import FastVisionModel, PatchDPOTrainer
 
 PatchDPOTrainer()
 
@@ -92,13 +92,30 @@ def main():
 
     # ---------- Load model ----------
     print("Loading model...")
-    model, tokenizer = FastLanguageModel.from_pretrained(
+    model, tokenizer = FastVisionModel.from_pretrained(
         model_name=MODEL_NAME,
         max_seq_length=MAX_SEQ_LENGTH,
         load_in_4bit=False,  # QLoRA not recommended for Qwen3.5 (accuracy loss)
         load_in_16bit=True,  # bf16 LoRA
         full_finetuning=False,
         trust_remote_code=True,
+    )
+
+    # ---------- LoRA ----------
+    # finetune_vision_layers=False: text-only DPO, skip vision encoder
+    print("Applying LoRA (r=32)...")
+    model = FastVisionModel.get_peft_model(
+        model,
+        finetune_vision_layers=False,  # text-only — no vision data in DPO pairs
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
     )
     # Jackrong model uses a custom TokenizersBackend that Unsloth's DPO trainer
     # can't handle. Replace with the standard Qwen3.5-9B tokenizer (same vocabulary).
