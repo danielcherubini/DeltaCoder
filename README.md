@@ -1,6 +1,7 @@
 # Qwen3.5-DeltaCoder-9B
 
 > Reliable tool-calling for agentic coding — LoRA fine-tune of Qwen3.5-9B
+> **v1.1-DPO in progress** — DPO alignment underway to improve code correctness
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
@@ -91,14 +92,20 @@ model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
 ```
 configs/
   deltacoder-9b-lora.yaml        # Axolotl training configuration (legacy)
+  deltacoder-9b-dpo.yaml         # DPO hyperparameter reference
 scripts/
-  train_unsloth.py                # Unsloth training script (used for final training)
+  train_unsloth.py                # Unsloth SFT training script (v1)
+  train_dpo.py                    # DPO training script (v1.1)
+  generate_dpo_pairs.py           # On-policy DPO pair generation (async)
+  merge_and_export_dpo.py         # Merge LoRA + export GGUFs (v1.1)
   pretokenize.py                  # Pre-tokenization script
   preprocess_coderforge.py        # XML -> OpenAI JSON
   preprocess_nemotron_swe.py      # Schema normalization
   preprocess_nemotron_agentic.py  # Strip reasoning_content
   preprocess_sweagent.py          # Plain text -> OpenAI JSON
   merge_datasets.py               # Combine and shuffle all datasets
+data/
+  dpo_pairs.jsonl                 # Generated DPO pairs (not committed)
 ```
 
 ## Key Findings
@@ -156,6 +163,34 @@ Evaluated using [EvalPlus](https://github.com/evalplus/evalplus) against the Q4_
 
 DeltaCoder retains most of the base model's code reasoning ability while adding reliable tool-call JSON formatting. Use the recommended sampling settings (temp=0.6) — greedy decoding significantly underperforms.
 
+## v1.1-DPO (In Progress)
+
+DeltaCoder v1 scored **2/4 (50%) on [Terminal-Bench](https://github.com/terminal-bench/terminal-bench) easy tasks**. The two failures were:
+- `overfull-hbox`: hallucinated a word not in the allowed synonym list
+- `cobol-modernization`: bytes/int type error in generated code — didn't catch its own bug
+
+v1.1 applies **Direct Preference Optimization (DPO)** to improve code correctness and self-verification:
+
+| Step | Status |
+|------|--------|
+| Generate DPO pairs from AceCode-V2-122K (10K problems, 8 samples each) | In progress |
+| DPO training on Vast.ai H100 | Pending |
+| GGUF export (Q4_K_M, Q5_K_M, Q6_K, Q8_0) | Pending |
+| HumanEval + Terminal-Bench evaluation | Pending |
+| HuggingFace release | Pending |
+
+### v1.1 Training Plan
+
+| Parameter | Value |
+|-----------|-------|
+| Method | DPO (Direct Preference Optimization) |
+| Dataset | On-policy pairs from [AceCode-V2-122K](https://huggingface.co/datasets/TIGER-Lab/AceCode-V2-122K) |
+| Pair generation | 8 samples/problem, keep if ≥1 pass AND ≥1 fail |
+| Beta | 0.1 |
+| Loss type | sigmoid |
+| Hardware | Vast.ai H100 80GB |
+| Framework | Unsloth + TRL ≥0.19.0 |
+
 ## Status
 
 - [x] Dataset research and format analysis
@@ -166,7 +201,11 @@ DeltaCoder retains most of the base model's code reasoning ability while adding 
 - [x] GGUF export (Q4_K_M, Q5_K_M, Q6_K, Q8_0)
 - [x] HuggingFace release
 - [x] Benchmarking (HumanEval via EvalPlus)
-- [ ] Benchmarking (Terminal-Bench, SWE-Bench)
+- [x] Terminal-Bench evaluation (2/4 easy tasks, 50%)
+- [ ] DPO pair generation (in progress)
+- [ ] DPO fine-tune (v1.1)
+- [ ] v1.1 GGUF export
+- [ ] v1.1 HumanEval + Terminal-Bench evaluation
 
 ## Acknowledgements
 
