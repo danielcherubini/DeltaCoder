@@ -117,14 +117,14 @@ def call_api(
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": "/no_think"},
-                {"role": "user", "content": problem["question"]},
-            ],
+            messages=[{"role": "user", "content": problem["question"]}],
             temperature=0.8,
             max_tokens=1024,
             n=n_samples,
-            extra_body=extra_body or {},
+            extra_body={
+                **(extra_body or {}),
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
         )
         return response.choices
 
