@@ -239,9 +239,18 @@ def main():
     print("\n=== Step 8: Generating quantized GGUFs ===")
     quantize_bin = f"{args.llama_cpp_dir}/build/bin/llama-quantize"
     for quant in QUANTS:
+        if quant == "BF16":
+            # BF16 is just the f16 GGUF renamed
+            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-BF16.gguf"
+            run(f"cp {f16_gguf} {out}")
+            continue
         out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-{quant}.gguf"
         print(f"  Quantizing {quant}...")
         run(f"{quantize_bin} {f16_gguf} {out} {quant}")
+
+    # Delete f16 GGUF after quantization to save disk (BF16 copy kept above)
+    print(f"  Removing intermediate f16 GGUF to free disk space...")
+    Path(f16_gguf).unlink(missing_ok=True)
 
     print("\n=== Done! ===")
     run(f"ls -lh {gguf_dir}/*.gguf", check=False)
