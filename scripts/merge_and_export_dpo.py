@@ -28,7 +28,20 @@ from unsloth import FastLanguageModel
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
-QUANTS = ["IQ2_XS", "IQ3_XS", "Q2_K", "Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
+QUANTS = [
+    "Q2_K",  # 2-bit
+    "Q3_K_S",
+    "Q3_K_M",
+    "Q3_K_L",  # 3-bit
+    "Q4_K_S",
+    "Q4_0",
+    "Q4_K_M",  # 4-bit
+    "Q5_K_S",
+    "Q5_0",
+    "Q5_K_M",  # 5-bit
+    "Q6_K",  # 6-bit
+    "Q8_0",  # 8-bit
+]
 HF_GGUF_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF"
 HF_ADAPTER_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B"
 
