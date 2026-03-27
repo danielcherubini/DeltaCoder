@@ -117,25 +117,6 @@ def main():
         use_gradient_checkpointing="unsloth",
         random_state=3407,
     )
-    # Jackrong model uses a custom TokenizersBackend that Unsloth's DPO trainer
-    # can't handle. Replace with the standard Qwen3.5-9B tokenizer (same vocabulary).
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-9B", trust_remote_code=True)
-
-    # ---------- LoRA ----------
-    print("Applying LoRA (r=32)...")
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=LORA_R,
-        target_modules=LORA_TARGET_MODULES,
-        lora_alpha=LORA_ALPHA,
-        lora_dropout=0,  # 0 is optimised by Unsloth
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=3407,
-        max_seq_length=MAX_SEQ_LENGTH,
-    )
 
     # ---------- Dataset ----------
     print("Loading DPO pairs...")
