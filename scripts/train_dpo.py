@@ -22,7 +22,7 @@ from datasets import Dataset
 from trl import DPOTrainer, DPOConfig
 
 # ---------- Config ----------
-MODEL_NAME = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
+MODEL_NAME = "Qwen/Qwen3.5-9B"
 MAX_SEQ_LENGTH = 4096
 LORA_R = 32
 LORA_ALPHA = 32
