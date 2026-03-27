@@ -100,11 +100,11 @@ def main():
         full_finetuning=False,
         trust_remote_code=True,
     )
-    # Ensure tokenizer is a plain tokenizer, not a multimodal processor.
-    # Unsloth may load a Qwen3VLProcessor for Qwen3.5 — replace it with the tokenizer only.
+    # Jackrong model uses a custom TokenizersBackend that Unsloth's DPO trainer
+    # can't handle. Replace with the standard Qwen3.5-9B tokenizer (same vocabulary).
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-9B", trust_remote_code=True)
 
     # ---------- LoRA ----------
     print("Applying LoRA (r=32)...")
