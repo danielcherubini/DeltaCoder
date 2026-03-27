@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Vast.ai instance setup for DPO pair generation
-# Run as root on a fresh CUDA 12.1+ instance with ≥24GB VRAM (RTX 4090 recommended)
+# Vast.ai instance setup for DPO pair generation using llama.cpp + GGUF
+# Run as root on a fresh CUDA 12.1+ instance
 #
 # Usage:
 #   bash vastai_setup.sh <HF_TOKEN>
 #
 # After setup, pair generation runs in the background.
-# Monitor with: tail -f /workspace/logs/generate_dpo_pairs.log
-# Download results with: rsync -avP root@<instance>:/workspace/data/dpo_pairs.jsonl ./data/
+# Monitor with: tail -f /workspace/DeltaCoder/logs/generate_dpo_pairs.log
+# Download results with: rsync -avP root@<instance>:/workspace/DeltaCoder/data/dpo_pairs.jsonl ./data/
 
 set -euo pipefail
 
@@ -18,56 +18,67 @@ if [[ -z "$HF_TOKEN" ]]; then
 fi
 
 WORKSPACE=/workspace
-MODEL="danielcherubini/Qwen3.5-DeltaCoder-9B"
-VLLM_PORT=8080
+GGUF_REPO="danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF"
+GGUF_FILE="Qwen3.5-DeltaCoder-9B-Q4_K_M.gguf"
+SERVER_PORT=8080
 SCRIPT_DIR="$WORKSPACE/DeltaCoder/scripts"
 
-echo "=== Step 1: Install dependencies ==="
-pip install -q vllm huggingface_hub openai numpy datasets tqdm
+echo "=== Step 1: Create directories ==="
+mkdir -p "$WORKSPACE/logs" "$WORKSPACE/model"
 
-echo "=== Step 2: Download model from HuggingFace ==="
-huggingface-cli download "$MODEL" \
+echo "=== Step 2: Install Python dependencies ==="
+pip install -q huggingface_hub openai numpy datasets tqdm
+
+echo "=== Step 3: Download GGUF from HuggingFace ==="
+huggingface-cli download "$GGUF_REPO" "$GGUF_FILE" \
     --token "$HF_TOKEN" \
-    --local-dir "$WORKSPACE/model" \
-    --local-dir-use-symlinks False
+    --local-dir "$WORKSPACE/model"
 
-echo "=== Step 3: Clone DeltaCoder repo ==="
-git clone https://github.com/danielcherubini/DeltaCoder.git "$WORKSPACE/DeltaCoder" || true
+echo "=== Step 4: Download llama.cpp release binary ==="
+LLAMA_RELEASE="b5569"
+LLAMA_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_RELEASE}/llama-${LLAMA_RELEASE}-bin-ubuntu-x64.zip"
+curl -L "$LLAMA_URL" -o /tmp/llama.zip
+unzip -o /tmp/llama.zip -d /workspace/llama.cpp
+chmod +x /workspace/llama.cpp/build/bin/llama-server
+
+echo "=== Step 5: Clone DeltaCoder repo ==="
+if [[ ! -d "$WORKSPACE/DeltaCoder/.git" ]]; then
+    git clone https://github.com/danielcherubini/DeltaCoder.git "$WORKSPACE/DeltaCoder"
+fi
 mkdir -p "$WORKSPACE/DeltaCoder/data" "$WORKSPACE/DeltaCoder/logs"
 
-echo "=== Step 4: Start vLLM server ==="
-nohup python -m vllm.entrypoints.openai.api_server \
-    --model "$WORKSPACE/model" \
-    --served-model-name deltacoder \
-    --port $VLLM_PORT \
-    --dtype bfloat16 \
-    --max-model-len 4096 \
-    --enable-prefix-caching \
-    > "$WORKSPACE/logs/vllm.log" 2>&1 &
+echo "=== Step 6: Start llama-server ==="
+nohup /workspace/llama.cpp/build/bin/llama-server \
+    -m "$WORKSPACE/model/$GGUF_FILE" \
+    -ngl 999 \
+    -c 4096 \
+    --port $SERVER_PORT \
+    --host 0.0.0.0 \
+    > "$WORKSPACE/logs/llama-server.log" 2>&1 &
 
-VLLM_PID=$!
-echo "vLLM PID: $VLLM_PID"
+SERVER_PID=$!
+echo "llama-server PID: $SERVER_PID"
 
-echo "=== Step 5: Wait for vLLM to be ready ==="
-echo "Waiting for vLLM on port $VLLM_PORT..."
+echo "=== Step 7: Wait for server to be ready ==="
+echo "Waiting for llama-server on port $SERVER_PORT..."
 for i in $(seq 1 60); do
-    if curl -sf "http://localhost:$VLLM_PORT/health" > /dev/null 2>&1; then
-        echo "vLLM is ready!"
+    if curl -sf "http://localhost:$SERVER_PORT/health" > /dev/null 2>&1; then
+        echo "llama-server is ready!"
         break
     fi
     if [[ $i -eq 60 ]]; then
-        echo "ERROR: vLLM did not start in 60s. Check $WORKSPACE/logs/vllm.log"
+        echo "ERROR: llama-server did not start in 60s. Check $WORKSPACE/logs/llama-server.log"
         exit 1
     fi
     sleep 5
 done
 
-echo "=== Step 6: Start pair generation ==="
+echo "=== Step 8: Start pair generation ==="
 cd "$WORKSPACE/DeltaCoder"
 nohup env HF_TOKEN="$HF_TOKEN" python "$SCRIPT_DIR/generate_dpo_pairs.py" \
     --n-problems 10000 \
     --n-samples 8 \
-    --api-base "http://localhost:$VLLM_PORT/v1" \
+    --api-base "http://localhost:$SERVER_PORT/v1" \
     --model deltacoder \
     > "$WORKSPACE/DeltaCoder/logs/generate_dpo_pairs.log" 2>&1 &
 
@@ -76,6 +87,6 @@ echo "Pair generation PID: $GEN_PID"
 
 echo ""
 echo "=== Setup complete ==="
-echo "Monitor vLLM:      tail -f $WORKSPACE/logs/vllm.log"
+echo "Monitor server:    tail -f $WORKSPACE/logs/llama-server.log"
 echo "Monitor progress:  tail -f $WORKSPACE/DeltaCoder/logs/generate_dpo_pairs.log"
 echo "Download results:  rsync -avP root@<instance>:$WORKSPACE/DeltaCoder/data/dpo_pairs.jsonl ./data/"
