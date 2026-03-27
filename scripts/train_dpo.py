@@ -99,8 +99,12 @@ def main():
         load_in_16bit=True,  # bf16 LoRA
         full_finetuning=False,
         trust_remote_code=True,
-        vision_model=False,  # text-only, prevent multimodal processor being used
     )
+    # Ensure tokenizer is a plain tokenizer, not a multimodal processor.
+    # Unsloth may load a Qwen3VLProcessor for Qwen3.5 — replace it with the tokenizer only.
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
     # ---------- LoRA ----------
     print("Applying LoRA (r=32)...")
