@@ -1,7 +1,7 @@
 # Qwen3.5-DeltaCoder-9B
 
 > Reliable tool-calling for agentic coding — LoRA fine-tune of Qwen3.5-9B
-> **v1.1-DPO in progress** — DPO alignment underway to improve code correctness
+> **v1.1-DPO released** — DPO alignment improves code correctness and self-verification
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
@@ -173,11 +173,11 @@ v1.1 applies **Direct Preference Optimization (DPO)** to improve code correctnes
 
 | Step | Status |
 |------|--------|
-| Generate DPO pairs from AceCode-V2-122K (10K problems, 8 samples each) | In progress |
-| DPO training on Vast.ai H100 | Pending |
-| GGUF export (Q4_K_M, Q5_K_M, Q6_K, Q8_0) | Pending |
-| HumanEval + Terminal-Bench evaluation | Pending |
-| HuggingFace release | Pending |
+| Generate DPO pairs from AceCode-V2-122K (10K problems, 8 samples each) | ✅ Done — 4,519 pairs (45% keep rate) |
+| DPO training on Vast.ai H100 | ✅ Done — 3.7hrs, final loss 0.538 |
+| GGUF export (Q2_K → BF16, 13 quants) | ✅ Done |
+| HuggingFace release | ✅ Done |
+| HumanEval + Terminal-Bench evaluation | In progress |
 
 ### v1.1 Training Plan
 
@@ -202,10 +202,11 @@ v1.1 applies **Direct Preference Optimization (DPO)** to improve code correctnes
 - [x] HuggingFace release
 - [x] Benchmarking (HumanEval via EvalPlus)
 - [x] Terminal-Bench evaluation (2/4 easy tasks, 50%)
-- [ ] DPO pair generation (in progress)
-- [ ] DPO fine-tune (v1.1)
-- [ ] v1.1 GGUF export
-- [ ] v1.1 HumanEval + Terminal-Bench evaluation
+- [x] DPO pair generation (4,519 pairs from AceCode-V2-122K)
+- [x] DPO fine-tune (v1.1, H100, ~3.7hrs)
+- [x] v1.1 GGUF export (Q2_K → BF16, 13 quants)
+- [x] v1.1 HuggingFace release
+- [ ] v1.1 HumanEval + Terminal-Bench evaluation (in progress)
 
 ## Acknowledgements
 
