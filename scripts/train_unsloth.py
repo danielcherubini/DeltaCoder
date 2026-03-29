@@ -129,6 +129,19 @@ def main():
     print(f"Formatted {len(texts)} rows ({skipped} skipped)")
     dataset = Dataset.from_list(texts)
 
+    # Tokenize the text field
+    print("Tokenizing dataset...")
+
+    def tokenize(example):
+        return tokenizer(
+            example["text"],
+            truncation=True,
+            max_length=MAX_SEQ_LENGTH,
+        )
+
+    dataset = dataset.map(tokenize, batched=True, num_proc=1, remove_columns=["text"])
+    dataset = dataset.with_format("torch")
+
     # ---------- Trainer ----------
     print("Setting up trainer...")
 
