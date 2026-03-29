@@ -102,8 +102,15 @@ def main():
                 records.append(json.loads(line))
     print(f"Loaded {len(records)} rows")
 
-    # Format messages for chat template and collect as text-only list
-    print("Formatting dataset...")
+    # Pre-format all rows to text using a plain AutoTokenizer's chat template.
+    # We avoid using Unsloth's patched tokenizer (a Qwen3VLProcessor) which
+    # tries to process text as image input.
+    from transformers import AutoTokenizer as PlainTok
+
+    print("Loading plain tokenizer for chat template formatting...")
+    plain_tok = PlainTok.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
+    print("Formatting dataset with chat template...")
     texts = []
     skipped = 0
     for row in records:
@@ -114,7 +121,7 @@ def main():
             tools = row.get("tools")
             if isinstance(tools, str):
                 tools = json.loads(tools)
-            text = tokenizer.apply_chat_template(
+            text = plain_tok.apply_chat_template(
                 messages,
                 tools=tools,
                 tokenize=False,
@@ -128,24 +135,6 @@ def main():
 
     print(f"Formatted {len(texts)} rows ({skipped} skipped)")
     dataset = Dataset.from_list(texts)
-
-    # Tokenize using a plain AutoTokenizer — Unsloth patches the tokenizer into a
-    # Qwen3VLProcessor (vision model) which breaks plain text tokenization.
-    from transformers import AutoTokenizer as PlainTokenizer
-
-    plain_tok = PlainTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-
-    print("Tokenizing dataset...")
-
-    def tokenize(example):
-        return plain_tok(
-            example["text"],
-            truncation=True,
-            max_length=MAX_SEQ_LENGTH,
-        )
-
-    dataset = dataset.map(tokenize, batched=True, num_proc=1, remove_columns=["text"])
-    dataset = dataset.with_format("torch")
 
     # ---------- Trainer ----------
     print("Setting up trainer...")
@@ -169,7 +158,6 @@ def main():
         dataset_text_field="text",
         packing=True,
         dataset_num_proc=1,  # CRITICAL: Qwen3.5 tokenizer crashes with multiprocessing
-        remove_unused_columns=False,
         report_to="none",
     )
 
