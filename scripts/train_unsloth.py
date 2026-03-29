@@ -125,6 +125,15 @@ def main():
 
     print(f"Prepared {len(dataset)} rows ({skipped} skipped)")
 
+    # Debug: show what the collator will see for one sample
+    print("\nSample row structure:")
+    sample = dataset[0]["messages"]
+    for msg in sample:
+        role = msg["role"]
+        content_preview = str(msg["content"])[:100]
+        print(f"  {role}: {content_preview}")
+    print()
+
     # ---------- Trainer ----------
     print("Setting up trainer...")
     FastVisionModel.for_training(model)
