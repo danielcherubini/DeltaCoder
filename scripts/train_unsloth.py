@@ -11,8 +11,9 @@ Usage:
 """
 
 import argparse
+import json
 from unsloth import FastLanguageModel
-from datasets import load_dataset
+from datasets import Dataset
 from trl import SFTTrainer, SFTConfig
 
 # ---------- Config ----------
@@ -91,29 +92,38 @@ def main():
     )
 
     # ---------- Dataset ----------
+    # Load line-by-line to avoid Arrow schema inference issues with mixed/nested fields
     print(f"Loading dataset from {args.dataset}...")
-    dataset = load_dataset("json", data_files={"train": args.dataset}, split="train")
-    print(f"Loaded {len(dataset)} rows")
+    records = []
+    with open(args.dataset, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    print(f"Loaded {len(records)} rows")
 
-    # Format messages for chat template
-    def format_messages(example):
-        """Apply chat template to messages, including tools if present."""
-        messages = example["messages"]
-        tools = example.get("tools")
-
-        text = tokenizer.apply_chat_template(
-            messages,
-            tools=tools,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        return {"text": text}
-
+    # Format messages for chat template and collect as text-only list
     print("Formatting dataset...")
-    dataset = dataset.map(
-        format_messages, num_proc=1, remove_columns=dataset.column_names
-    )
-    print(f"Formatted {len(dataset)} rows")
+    texts = []
+    skipped = 0
+    for row in records:
+        try:
+            messages = row["messages"]
+            tools = row.get("tools")
+            text = tokenizer.apply_chat_template(
+                messages,
+                tools=tools,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            texts.append({"text": text})
+        except Exception as e:
+            skipped += 1
+            if skipped <= 5:
+                print(f"  Skipping row: {e}")
+
+    print(f"Formatted {len(texts)} rows ({skipped} skipped)")
+    dataset = Dataset.from_list(texts)
 
     # ---------- Trainer ----------
     print("Setting up trainer...")
