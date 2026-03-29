@@ -19,7 +19,6 @@ import json
 from unsloth import FastVisionModel
 from unsloth.trainer import UnslothVisionDataCollator
 from trl import SFTTrainer, SFTConfig
-from transformers import AutoTokenizer
 
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
@@ -83,12 +82,11 @@ def main():
     )
 
     # ---------- Dataset ----------
-    # Load raw JSONL, apply chat template using plain AutoTokenizer
-    # (Unsloth's tokenizer is a VLProcessor — use plain one for text formatting only)
+    # UnslothVisionDataCollator expects a list of {"messages": [...]} dicts.
+    # It applies the chat template internally via the tokenizer.
+    # Pass messages directly — do NOT pre-format to text.
     print(f"Loading dataset from {args.dataset}...")
-    plain_tok = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
-    print("Applying chat template...")
     dataset = []
     skipped = 0
     with open(args.dataset, "r", encoding="utf-8") as f:
@@ -101,20 +99,20 @@ def main():
                 messages = row["messages"]
                 if isinstance(messages, str):
                     messages = json.loads(messages)
-                tools = row.get("tools")
-                if isinstance(tools, str):
-                    tools = json.loads(tools)
 
-                # Apply chat template to get formatted text
-                text = plain_tok.apply_chat_template(
-                    messages,
-                    tools=tools,
-                    tokenize=False,
-                    add_generation_prompt=False,
-                )
-                # UnslothVisionDataCollator expects {"messages": [...]} format
-                # For text-only, wrap the formatted text as a single assistant message
-                dataset.append({"messages": [{"role": "user", "content": text}]})
+                # Validate messages are list of dicts with role/content
+                if not isinstance(messages, list) or len(messages) < 2:
+                    skipped += 1
+                    continue
+                for msg in messages:
+                    if (
+                        not isinstance(msg, dict)
+                        or "role" not in msg
+                        or "content" not in msg
+                    ):
+                        raise ValueError(f"Invalid message format: {msg}")
+
+                dataset.append({"messages": messages})
             except Exception as e:
                 skipped += 1
                 if skipped <= 5:
