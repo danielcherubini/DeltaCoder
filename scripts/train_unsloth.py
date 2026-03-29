@@ -19,6 +19,9 @@ import json
 from unsloth import FastVisionModel
 from unsloth.trainer import UnslothVisionDataCollator
 from trl import SFTTrainer, SFTConfig
+from transformers import AutoTokenizer
+import torch
+import copy
 
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
@@ -134,6 +137,63 @@ def main():
         print(f"  {role}: {content_preview}")
     print()
 
+    # ---------- Custom Data Collator ----------
+    # UnslothVisionDataCollator doesn't mask user/system labels for text-only data.
+    # We wrap it to add proper label masking — only train on assistant tokens.
+    class MaskedVisionDataCollator(UnslothVisionDataCollator):
+        """Wraps UnslothVisionDataCollator to mask non-assistant labels."""
+
+        def __init__(self, model, processor):
+            super().__init__(model, processor)
+            # Get the assistant header tokens to find where assistant responses start
+            self._asst_header = processor.encode(
+                "<|im_start|>assistant\n", add_special_tokens=False
+            )
+            self._end_token = processor.encode("<|im_end|>", add_special_tokens=False)
+            self._think_start = processor.encode("<think>", add_special_tokens=False)
+
+        def __call__(self, examples):
+            batch = super().__call__(examples)
+            # Mask non-assistant tokens in labels
+            for i in range(batch["input_ids"].shape[0]):
+                input_ids = batch["input_ids"][i].tolist()
+                labels = batch["labels"][i].clone()
+
+                # Find all assistant response regions and only keep those as labels
+                asst_header = self._asst_header
+                end_token = self._end_token
+                header_len = len(asst_header)
+                end_len = len(end_token)
+
+                # First mask everything
+                labels[:] = -100
+
+                # Then unmask assistant response regions
+                j = 0
+                while j < len(input_ids) - header_len:
+                    # Check for assistant header
+                    if input_ids[j : j + header_len] == asst_header:
+                        # Found assistant start — unmask from after the header
+                        # to the next <|im_end|>
+                        start = j + header_len
+                        k = start
+                        while k < len(input_ids) - end_len:
+                            if input_ids[k : k + end_len] == end_token:
+                                # Include the end token in training
+                                k += end_len
+                                break
+                            k += 1
+                        labels[start:k] = batch["input_ids"][i][start:k]
+                        j = k
+                    else:
+                        j += 1
+
+                batch["labels"][i] = labels
+            return batch
+
+    # Use plain tokenizer for encoding header tokens (Unsloth's is a processor)
+    plain_tok = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
     # ---------- Trainer ----------
     print("Setting up trainer...")
     FastVisionModel.for_training(model)
@@ -154,12 +214,25 @@ def main():
         bf16=True,
         seed=3407,
         report_to="none",
-        # Required for VLM SFT with UnslothVisionDataCollator:
+        # Required for VLM SFT:
         remove_unused_columns=False,
         dataset_text_field="",
         dataset_kwargs={"skip_prepare_dataset": True},
         max_length=MAX_SEQ_LENGTH,
         dataset_num_proc=1,
+    )
+
+    if args.max_steps > 0:
+        sft_config_kwargs["max_steps"] = args.max_steps
+
+    collator = MaskedVisionDataCollator(model, plain_tok)
+
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        data_collator=collator,
+        train_dataset=dataset,
+        args=SFTConfig(**sft_config_kwargs),
     )
 
     if args.max_steps > 0:
