@@ -151,6 +151,7 @@ def main():
         dataset_text_field="text",
         packing=True,
         dataset_num_proc=1,  # CRITICAL: Qwen3.5 tokenizer crashes with multiprocessing
+        remove_unused_columns=False,
         report_to="none",
     )
 
