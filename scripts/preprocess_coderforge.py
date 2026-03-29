@@ -32,7 +32,7 @@ def parse_xml_tool_calls(content: str) -> tuple[str, list[dict]]:
     # Match <function_calls>...</function_calls> blocks
     pattern = re.compile(
         r'<function_calls>\s*<invoke name="([^"]+)">(.*?)</invoke>\s*</function_calls>',
-        re.DOTALL
+        re.DOTALL,
     )
 
     clean_content = content
@@ -43,22 +43,20 @@ def parse_xml_tool_calls(content: str) -> tuple[str, list[dict]]:
 
         # Parse <parameter name="key">value</parameter>
         param_pattern = re.compile(
-            r'<parameter name="([^"]+)">(.*?)</parameter>',
-            re.DOTALL
+            r'<parameter name="([^"]+)">(.*?)</parameter>', re.DOTALL
         )
         arguments = {}
         for param_match in param_pattern.finditer(params_block):
             arguments[param_match.group(1)] = param_match.group(2).strip()
 
         call_id = f"call_{uuid.uuid4().hex[:24]}"
-        tool_calls.append({
-            "id": call_id,
-            "type": "function",
-            "function": {
-                "name": func_name,
-                "arguments": json.dumps(arguments)
+        tool_calls.append(
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": func_name, "arguments": json.dumps(arguments)},
             }
-        })
+        )
 
         # Remove the XML block from content
         clean_content = clean_content.replace(match.group(0), "").strip()
@@ -92,11 +90,9 @@ def convert_messages(raw_messages: list[dict]) -> list[dict]:
             # If there are pending tool calls, this is a tool result
             if pending_tool_calls:
                 for tc in pending_tool_calls:
-                    converted.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": content
-                    })
+                    converted.append(
+                        {"role": "tool", "tool_call_id": tc["id"], "content": content}
+                    )
                 pending_tool_calls = []
             else:
                 converted.append({"role": "user", "content": content})
@@ -114,11 +110,14 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "The bash command to execute."}
+                    "command": {
+                        "type": "string",
+                        "description": "The bash command to execute.",
+                    }
                 },
-                "required": ["command"]
-            }
-        }
+                "required": ["command"],
+            },
+        },
     },
     {
         "type": "function",
@@ -128,17 +127,20 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "enum": ["view", "create", "str_replace"]},
+                    "command": {
+                        "type": "string",
+                        "enum": ["view", "create", "str_replace"],
+                    },
                     "path": {"type": "string"},
                     "file_text": {"type": "string"},
                     "old_str": {"type": "string"},
                     "new_str": {"type": "string"},
                     "start": {"type": "integer"},
-                    "end": {"type": "integer"}
+                    "end": {"type": "integer"},
                 },
-                "required": ["command", "path"]
-            }
-        }
+                "required": ["command", "path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -147,12 +149,10 @@ TOOL_DEFINITIONS = [
             "description": "Log a reasoning step without taking action.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "thought": {"type": "string"}
-                },
-                "required": ["thought"]
-            }
-        }
+                "properties": {"thought": {"type": "string"}},
+                "required": ["thought"],
+            },
+        },
     },
     {
         "type": "function",
@@ -161,34 +161,35 @@ TOOL_DEFINITIONS = [
             "description": "Signal that the task is complete.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "message": {"type": "string"}
-                },
-                "required": []
-            }
-        }
-    }
+                "properties": {"message": {"type": "string"}},
+                "required": [],
+            },
+        },
+    },
 ]
 
 
-def process_dataset(output_path: str, split: str = "SWE_Rebench", max_rows: int = None):
-    """Load CoderForge, filter to reward=1.0, convert, and write JSONL."""
+def process_dataset(
+    output_path: str, split: str = "filtered_reward1", max_rows: int = 50_000
+):
+    """Load CoderForge, convert, shuffle, cap, and write JSONL."""
     print(f"Loading CoderForge-Preview split={split}...")
     ds = load_dataset(
         "togethercomputer/CoderForge-Preview",
         "trajectories",
         split=split,
-        streaming=True
+        streaming=False,  # Non-streaming so we can shuffle
     )
+
+    # Shuffle and cap
+    ds = ds.shuffle(seed=42).select(range(min(max_rows, len(ds))))
+    print(f"Using {len(ds)} rows after shuffle+cap")
 
     count = 0
     skipped = 0
 
     with open(output_path, "w", encoding="utf-8") as f:
-        for row in ds:
-            if max_rows and count >= max_rows:
-                break
-
+        for i, row in enumerate(ds):
             # Filter to successful trajectories only
             if row.get("reward", 0) != 1.0:
                 skipped += 1
@@ -209,7 +210,7 @@ def process_dataset(output_path: str, split: str = "SWE_Rebench", max_rows: int 
                 "messages": converted,
                 "tools": TOOL_DEFINITIONS,
                 "source": "coderforge",
-                "id": row.get("trajectory_id", f"coderforge_{count}")
+                "id": row.get("trajectory_id", f"coderforge_{count}"),
             }
 
             f.write(json.dumps(out) + "\n")

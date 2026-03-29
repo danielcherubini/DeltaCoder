@@ -16,10 +16,13 @@ import sys
 from pathlib import Path
 
 INPUT_FILES = [
+    "data/magicoder_converted.jsonl",
     "data/coderforge_converted.jsonl",
-    "data/nemotron_swe_converted.jsonl",
-    "data/nemotron_agentic_converted.jsonl",
-    "data/sweagent_converted.jsonl",
+    "data/code_feedback_converted.jsonl",
+    "data/hermes_converted.jsonl",
+    "data/glaive_converted.jsonl",
+    "data/opus_reasoning_converted.jsonl",
+    "data/qwen35_reasoning_converted.jsonl",
 ]
 
 
@@ -35,7 +38,7 @@ def load_jsonl(path: str) -> list[dict]:
 
 
 def main():
-    output = sys.argv[1] if len(sys.argv) > 1 else "data/train.jsonl"
+    output = sys.argv[1] if len(sys.argv) > 1 else "data/v1.2_sft_train.jsonl"
     seed = int(sys.argv[2]) if len(sys.argv) > 2 else 42
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
