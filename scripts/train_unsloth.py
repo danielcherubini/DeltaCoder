@@ -12,9 +12,13 @@ Usage:
 
 import argparse
 import json
+import tempfile
+from pathlib import Path
+
 from unsloth import FastLanguageModel
-from datasets import Dataset
+from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
+from transformers import AutoTokenizer
 
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
@@ -92,49 +96,52 @@ def main():
     )
 
     # ---------- Dataset ----------
-    # Load line-by-line to avoid Arrow schema inference issues with mixed/nested fields
+    # Load raw JSONL line-by-line, apply chat template using a plain AutoTokenizer
+    # (Unsloth patches the tokenizer into a VLProcessor which breaks text tokenization),
+    # then write a clean text-only JSONL for SFTTrainer.
     print(f"Loading dataset from {args.dataset}...")
-    records = []
+    plain_tok = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
+    print("Applying chat template...")
+    texts = []
+    skipped = 0
     with open(args.dataset, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
-                records.append(json.loads(line))
-    print(f"Loaded {len(records)} rows")
-
-    # Pre-format all rows to text using a plain AutoTokenizer's chat template.
-    # We avoid using Unsloth's patched tokenizer (a Qwen3VLProcessor) which
-    # tries to process text as image input.
-    from transformers import AutoTokenizer as PlainTok
-
-    print("Loading plain tokenizer for chat template formatting...")
-    plain_tok = PlainTok.from_pretrained(MODEL_NAME, trust_remote_code=True)
-
-    print("Formatting dataset with chat template...")
-    texts = []
-    skipped = 0
-    for row in records:
-        try:
-            messages = row["messages"]
-            if isinstance(messages, str):
-                messages = json.loads(messages)
-            tools = row.get("tools")
-            if isinstance(tools, str):
-                tools = json.loads(tools)
-            text = plain_tok.apply_chat_template(
-                messages,
-                tools=tools,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-            texts.append({"text": text})
-        except Exception as e:
-            skipped += 1
-            if skipped <= 5:
-                print(f"  Skipping row: {e}")
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                messages = row["messages"]
+                if isinstance(messages, str):
+                    messages = json.loads(messages)
+                tools = row.get("tools")
+                if isinstance(tools, str):
+                    tools = json.loads(tools)
+                text = plain_tok.apply_chat_template(
+                    messages,
+                    tools=tools,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                )
+                texts.append({"text": text})
+            except Exception as e:
+                skipped += 1
+                if skipped <= 5:
+                    print(f"  Skipping row: {e}")
 
     print(f"Formatted {len(texts)} rows ({skipped} skipped)")
-    dataset = Dataset.from_list(texts)
+
+    # Write clean text-only JSONL to a temp file and load it
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    )
+    for row in texts:
+        tmp.write(json.dumps(row) + "\n")
+    tmp.close()
+
+    dataset = load_dataset("json", data_files={"train": tmp.name}, split="train")
+    print(f"Dataset loaded: {len(dataset)} rows")
 
     # ---------- Trainer ----------
     print("Setting up trainer...")
@@ -180,6 +187,9 @@ def main():
     print(f"Saving model to {adapter_path}...")
     model.save_pretrained(adapter_path)
     tokenizer.save_pretrained(adapter_path)
+
+    # Cleanup temp file
+    Path(tmp.name).unlink(missing_ok=True)
     print("Done!")
 
 
