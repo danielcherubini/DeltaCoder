@@ -129,11 +129,16 @@ def main():
     print(f"Formatted {len(texts)} rows ({skipped} skipped)")
     dataset = Dataset.from_list(texts)
 
-    # Tokenize the text field
+    # Tokenize using a plain AutoTokenizer — Unsloth patches the tokenizer into a
+    # Qwen3VLProcessor (vision model) which breaks plain text tokenization.
+    from transformers import AutoTokenizer as PlainTokenizer
+
+    plain_tok = PlainTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
     print("Tokenizing dataset...")
 
     def tokenize(example):
-        return tokenizer(
+        return plain_tok(
             example["text"],
             truncation=True,
             max_length=MAX_SEQ_LENGTH,
