@@ -109,7 +109,11 @@ def main():
     for row in records:
         try:
             messages = row["messages"]
+            if isinstance(messages, str):
+                messages = json.loads(messages)
             tools = row.get("tools")
+            if isinstance(tools, str):
+                tools = json.loads(tools)
             text = tokenizer.apply_chat_template(
                 messages,
                 tools=tools,
