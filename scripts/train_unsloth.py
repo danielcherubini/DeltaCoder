@@ -104,15 +104,20 @@ def main():
                 if not isinstance(messages, list) or len(messages) < 2:
                     skipped += 1
                     continue
-                for msg in messages:
-                    if (
-                        not isinstance(msg, dict)
-                        or "role" not in msg
-                        or "content" not in msg
-                    ):
-                        raise ValueError(f"Invalid message format: {msg}")
 
-                dataset.append({"messages": messages})
+                # UnslothVisionDataCollator's Jinja template requires content to be
+                # a list of typed blocks: [{"type": "text", "text": "..."}]
+                # Convert plain string content to this format.
+                converted = []
+                for msg in messages:
+                    if not isinstance(msg, dict) or "role" not in msg:
+                        raise ValueError(f"Invalid message format: {msg}")
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        content = [{"type": "text", "text": content}]
+                    converted.append({"role": msg["role"], "content": content})
+
+                dataset.append({"messages": converted})
             except Exception as e:
                 skipped += 1
                 if skipped <= 5:
