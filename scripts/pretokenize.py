@@ -18,7 +18,7 @@ from functools import partial
 from transformers import AutoTokenizer
 
 SEQUENCE_LEN = 8192
-MODEL_ID = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
+MODEL_ID = "Qwen/Qwen3.5-9B"
 
 # Qwen3.5 chat template format:
 # <|im_start|>system\n...<|im_end|>\n
@@ -31,6 +31,38 @@ MODEL_ID = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
 def load_tokenizer(model_id):
     tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     return tok
+
+
+def normalize_messages(messages):
+    """
+    Normalize messages for apply_chat_template compatibility.
+    - Flatten tool_calls into content string (xlam format)
+    - Ensure content is always a string
+    - Keep only role + content keys
+    """
+    normalized = []
+    for m in messages:
+        role = m["role"]
+        content = m.get("content", "") or ""
+
+        # If assistant message has tool_calls, format them into content
+        if "tool_calls" in m and m["tool_calls"]:
+            calls = []
+            for tc in m["tool_calls"]:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args = func.get("arguments", "{}")
+                calls.append(
+                    f'<functioncall> {{"name": "{name}", "arguments": {args}}}'
+                )
+            content = "\n".join(calls)
+
+        # Ensure content is a string
+        if not isinstance(content, str):
+            content = str(content)
+
+        normalized.append({"role": role, "content": content})
+    return normalized
 
 
 def find_assistant_spans(input_ids, im_start_id, im_end_id, assistant_nl_ids):
@@ -53,7 +85,10 @@ def find_assistant_spans(input_ids, im_start_id, im_end_id, assistant_nl_ids):
             # Check if next tokens match "assistant\n"
             header_start = i + 1
             header_end = header_start + header_len
-            if header_end <= n and input_ids[header_start:header_end] == assistant_nl_ids:
+            if (
+                header_end <= n
+                and input_ids[header_start:header_end] == assistant_nl_ids
+            ):
                 # Found assistant turn — content starts after header
                 content_start = header_end
                 # Find the closing <|im_end|>
@@ -70,7 +105,9 @@ def find_assistant_spans(input_ids, im_start_id, im_end_id, assistant_nl_ids):
     return spans
 
 
-def tokenize_conversation(messages, tokenizer, sequence_len, im_start_id, im_end_id, assistant_nl_ids):
+def tokenize_conversation(
+    messages, tokenizer, sequence_len, im_start_id, im_end_id, assistant_nl_ids
+):
     """Tokenize a single conversation with proper assistant masking."""
     # Single call to apply_chat_template — O(1) per conversation
     out = tokenizer.apply_chat_template(
@@ -110,11 +147,15 @@ def process_chunk(chunk, model_id, sequence_len):
 
     results = []
     for row in chunk:
-        messages = row["messages"]
+        messages = normalize_messages(row["messages"])
         try:
             input_ids, attention_mask, labels = tokenize_conversation(
-                messages, tokenizer, sequence_len,
-                im_start_id, im_end_id, assistant_nl_ids,
+                messages,
+                tokenizer,
+                sequence_len,
+                im_start_id,
+                im_end_id,
+                assistant_nl_ids,
             )
             # Skip empty sequences
             if len(input_ids) < 10:
@@ -123,11 +164,13 @@ def process_chunk(chunk, model_id, sequence_len):
             n_trainable = sum(1 for l in labels if l != -100)
             if n_trainable == 0:
                 continue
-            results.append({
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "labels": labels,
-            })
+            results.append(
+                {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "labels": labels,
+                }
+            )
         except Exception as e:
             print(f"Skipping row: {e}", file=sys.stderr)
             continue
@@ -165,22 +208,30 @@ def main():
     # Test a few rows to verify masking works
     for test_idx in range(min(5, len(rows))):
         test_ids, test_mask, test_labels = tokenize_conversation(
-            rows[test_idx]["messages"], tokenizer, SEQUENCE_LEN,
-            im_start_id, im_end_id, assistant_nl_ids,
+            rows[test_idx]["messages"],
+            tokenizer,
+            SEQUENCE_LEN,
+            im_start_id,
+            im_end_id,
+            assistant_nl_ids,
         )
         n_masked = sum(1 for l in test_labels if l == -100)
         n_total = len(test_labels)
         n_trainable = n_total - n_masked
-        print(f"Row {test_idx}: {n_total} tokens, {n_trainable} assistant ({n_trainable/max(n_total,1)*100:.1f}%), {n_masked} masked")
+        print(
+            f"Row {test_idx}: {n_total} tokens, {n_trainable} assistant ({n_trainable / max(n_total, 1) * 100:.1f}%), {n_masked} masked"
+        )
         if n_trainable > 0:
             break
     else:
-        print("WARNING: No assistant tokens found in first 5 rows — check chat template markers")
+        print(
+            "WARNING: No assistant tokens found in first 5 rows — check chat template markers"
+        )
     del tokenizer
 
     # Split into chunks for multiprocessing
     chunk_size = max(1, len(rows) // num_workers)
-    chunks = [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)]
+    chunks = [rows[i : i + chunk_size] for i in range(0, len(rows), chunk_size)]
     print(f"Split into {len(chunks)} chunks of ~{chunk_size} rows", flush=True)
 
     # Process in parallel
@@ -188,13 +239,15 @@ def main():
     process_fn = partial(process_chunk, model_id=MODEL_ID, sequence_len=SEQUENCE_LEN)
 
     written = 0
-    with mp.Pool(num_workers) as pool, \
-         open(output_path, "w", encoding="utf-8") as fout:
+    with mp.Pool(num_workers) as pool, open(output_path, "w", encoding="utf-8") as fout:
         for i, results in enumerate(pool.imap_unordered(process_fn, chunks)):
             for result in results:
                 fout.write(json.dumps(result) + "\n")
                 written += 1
-            print(f"  Chunk {i+1}/{len(chunks)} done ({written} rows written)", flush=True)
+            print(
+                f"  Chunk {i + 1}/{len(chunks)} done ({written} rows written)",
+                flush=True,
+            )
 
     print(f"\nDone! {written}/{len(rows)} rows tokenized → {output_path}")
     file_size = os.path.getsize(output_path) / (1024**3)

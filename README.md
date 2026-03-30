@@ -1,10 +1,10 @@
 # Qwen3.5-DeltaCoder-9B
 
 > Reliable tool-calling for agentic coding — LoRA fine-tune of Qwen3.5-9B
-> **v1.1-DPO released** — DPO alignment improves code correctness and self-verification
+> **v1.2 in progress** — retrained from clean base with 230K coding-focused dataset
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
+[![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Qwen/Qwen3.5-9B)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-GGUF-yellow)](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF)
 [![LoRA](https://img.shields.io/badge/HuggingFace-LoRA-orange)](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B)
 
@@ -20,37 +20,76 @@ Small language models can reason about code, but they struggle to **call tools r
 | GGUF Q8_0 | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF) | 8.9 GB |
 | LoRA adapter | [HuggingFace](https://huggingface.co/danielcherubini/Qwen3.5-DeltaCoder-9B) | 661 MB |
 
-## The Problem
+## Version History
 
-[Jackrong's Qwen3.5-9B reasoning distill](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2) scores **53.7% on HumanEval** — best-in-class at 9B. But when used as a coding agent, it frequently produces malformed JSON tool calls:
+### v1.2 (In Progress)
 
-```
-tool=edit, error=JSON Parse error: Property name must be a string literal
-tool=bash, error=JSON Parse error: Expected '}'
-```
+Complete retrain from clean `Qwen/Qwen3.5-9B` base with a curated, 100% coding-focused dataset:
 
-The model picks the right tool and the right content, but breaks on JSON serialization — especially when arguments contain multi-line code, nested quotes, or special characters.
+| Dataset | Rows | Purpose |
+|---------|------|---------|
+| [nvidia/OpenCodeReasoning](https://huggingface.co/datasets/nvidia/OpenCodeReasoning) | 65K | Code reasoning with `<think>` traces (R1-generated) |
+| [Magicoder-OSS-Instruct-75K](https://huggingface.co/datasets/ise-uiuc/Magicoder-OSS-Instruct-75K) | 50K | Single-turn code generation |
+| [CoderForge-Preview](https://huggingface.co/datasets/togethercomputer/CoderForge-Preview) | 50K | SWE-agent tool-use trajectories |
+| [Code-Feedback](https://huggingface.co/datasets/m-a-p/Code-Feedback) | 50K | Multi-turn code revision |
+| [xlam-function-calling-60k](https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k) | 15K | Verified function calling |
+| **Total** | **230K** | |
 
-**DeltaCoder aims to fix this.**
+**Key improvements over v1:**
+- Clean `Qwen/Qwen3.5-9B` base (not a third-party distill)
+- 230K rows (vs 50K) — 4.6x more training data
+- 100% coding-focused (v1 had generic function calling waste)
+- R1 reasoning traces for chain-of-thought coding
+- Execution-verified function calling (xlam)
+- Axolotl with sample packing at 8192 seq length
 
-## Training Details
+| Step | Status |
+|------|--------|
+| Dataset preprocessing (5 datasets → 230K rows) | ✅ Done |
+| SFT training (Axolotl, H200 141GB, batch=1+packing) | 🔄 Running (~46hrs, ~$87) |
+| On-policy DPO pair generation | ⏳ Pending |
+| DPO training | ⏳ Pending |
+| GGUF export + HuggingFace upload | ⏳ Pending |
+| Terminal-Bench + HumanEval evaluation | ⏳ Pending |
+
+### v1.1-DPO
+
+DPO alignment on top of v1 to improve code correctness and self-verification.
+
+- **DPO pairs:** 4,519 from AceCode-V2-122K (on-policy, 45% keep rate)
+- **Training:** 3.7hrs on H100, final loss 0.538
+- **Terminal-Bench:** 2/4 easy tasks (50%) — same score as v1 but different failure mode (timeouts from self-correction attempts vs immediate failures)
+- **Status:** ✅ Released
+
+### v1
+
+Initial LoRA fine-tune on 50K CoderForge-Preview trajectories.
+
+- **Base:** Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2
+- **HumanEval:** 50.6% (temp=0.6)
+- **Terminal-Bench:** 2/4 easy tasks (50%)
+- **Status:** ✅ Released (superseded by v1.1-DPO)
+
+## Training Details (v1.2)
 
 | Parameter | Value |
 |-----------|-------|
 | Base model | Qwen3.5-9B (hybrid GDN architecture) |
 | Method | LoRA (r=64, alpha=32) |
-| Dataset | [CoderForge-Preview](https://huggingface.co/datasets/togethercomputer/CoderForge-Preview) `filtered_reward1` (50K subset) |
-| Sequence length | 4096 |
-| Effective batch size | 16 (batch=2 x grad_accum=8) |
+| Framework | Axolotl 0.15.0 (sample packing) |
+| Dataset | 230K rows (5 coding datasets) |
+| Sequence length | 8192 |
+| Sample packing | true |
+| Micro batch size | 1 (GDN limitation — cannot go higher with packing) |
+| Gradient accumulation | 4 |
 | Learning rate | 1e-4 (cosine schedule) |
 | Epochs | 1 |
-| Optimizer | AdamW |
 | Precision | BF16 |
-| Hardware | NVIDIA H200 140GB (Vast.ai) |
-| Training time | ~10 hours |
-| Training cost | ~$25 |
-| Framework | Unsloth 2026.3.10 + HuggingFace Transformers 5.3.0 |
-| Final loss | ~0.94 |
+| Attention | SDPA (FA2 causes CUDA errors with GDN) |
+| group_by_length | true (reduces padding waste) |
+| Hardware | NVIDIA H200 141GB (Vast.ai, France) |
+| Estimated training time | ~46 hours |
+| Estimated cost | ~$87 |
 
 ### LoRA Target Modules
 
@@ -81,7 +120,7 @@ from transformers import AutoModelForCausalLM
 from peft import PeftModel
 
 base = AutoModelForCausalLM.from_pretrained(
-    "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2",
+    "Qwen/Qwen3.5-9B",
     trust_remote_code=True,
 )
 model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
@@ -91,127 +130,99 @@ model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
 
 ```
 configs/
-  deltacoder-9b-lora.yaml        # Axolotl training configuration (legacy)
-  deltacoder-9b-dpo.yaml         # DPO hyperparameter reference
+  deltacoder-9b-lora.yaml           # Axolotl config (v1, legacy)
+  deltacoder-9b-lora-v1.2.yaml      # Axolotl config (v1.2)
+  deltacoder-9b-dpo.yaml            # DPO hyperparameter reference
 scripts/
-  train_unsloth.py                # Unsloth SFT training script (v1)
-  train_dpo.py                    # DPO training script (v1.1)
-  generate_dpo_pairs.py           # On-policy DPO pair generation (async)
-  merge_and_export_dpo.py         # Merge LoRA + export GGUFs (v1.1)
-  pretokenize.py                  # Pre-tokenization script
-  preprocess_coderforge.py        # XML -> OpenAI JSON
-  preprocess_nemotron_swe.py      # Schema normalization
-  preprocess_nemotron_agentic.py  # Strip reasoning_content
-  preprocess_sweagent.py          # Plain text -> OpenAI JSON
-  merge_datasets.py               # Combine and shuffle all datasets
+  pretokenize.py                     # Pre-tokenization with assistant masking
+  train_unsloth.py                   # Unsloth SFT (v1, deprecated for v1.2)
+  train_dpo.py                       # DPO training (HF+PEFT+TRL)
+  generate_dpo_pairs.py              # On-policy DPO pair generation (async)
+  merge_and_export_dpo.py            # Two-stage LoRA merge + GGUF export
+  preprocess_opencoder_reasoning.py  # nvidia/OpenCodeReasoning → JSONL
+  preprocess_magicoder.py            # Magicoder → JSONL
+  preprocess_coderforge.py           # CoderForge XML → OpenAI JSON
+  preprocess_code_feedback.py        # Code-Feedback → JSONL
+  preprocess_xlam.py                 # xlam function calling → JSONL
+  merge_datasets.py                  # Combine and shuffle all datasets
 data/
-  dpo_pairs.jsonl                 # Generated DPO pairs (not committed)
+  v1.2_sft_train.jsonl               # Merged 230K training set
+  dpo_pairs.jsonl                    # v1.1 DPO pairs
+docs/
+  plans/                             # Implementation plans
 ```
 
 ## Key Findings
 
 Things discovered during development that may help others working with Qwen3.5:
 
-> [!NOTE]
-> **Unsloth now supports Qwen3.5** (as of 2026.3.10) with custom Triton kernels. It's significantly faster than Axolotl for this architecture.
+> [!WARNING]
+> **Qwen3.5 GDN does not support `micro_batch_size > 1` with sample packing.** The Gated Delta Net layers use `cu_seqlens` which requires batch dimension = 1. This is confirmed by [NVIDIA/Megatron-LM #3798](https://github.com/nvidia/megatron-lm/issues/3798), [axolotl #3453](https://github.com/axolotl-ai-cloud/axolotl/issues/3453), and [ms-swift docs](https://swift.readthedocs.io/en/latest/BestPractices/Qwen3_5-Best-Practice.html). Use `group_by_length: true` to reduce padding waste.
 
 > [!WARNING]
-> **Do not use `flash_attention_2` with sample packing on Qwen3.5** — this causes training loss to go to 0. Use `attn_implementation: sdpa` instead.
+> **Do not use `flash_attention_2` with Qwen3.5 GDN layers** — causes `cudaErrorIllegalAddress`. Use `attn_implementation: sdpa` instead. Sample packing with SDPA works at batch=1.
+
+> [!WARNING]
+> **Do not use Unsloth for large-scale SFT on Qwen3.5.** Unsloth's VLM collator doesn't support sample packing. Without packing, training 230K rows takes 132+ hours. Axolotl with `sample_packing: true` reduces this to ~46 hours.
+
+> [!WARNING]
+> **Do not use Unsloth DPOTrainer with Qwen3.5** — it detects the model as a VLM and crashes with `KeyError: 'images'`. Use plain HuggingFace + PEFT + TRL instead.
 
 - Qwen3.5 uses **Gated Delta Networks** (not Mamba) — the GDN layer names are `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a`, `out_proj`
-- The tokenizer is a `Qwen3VLProcessor` — standard `DataCollatorForSeq2Seq` won't work (lacks `.pad()`), use a custom collator or Unsloth's native pipeline
-- `bitsandbytes adamw_8bit` may fail on some CUDA setups — `adamw_torch` is a safe fallback
-- `causal-conv1d` may not build if system CUDA and PyTorch CUDA versions mismatch — flash-linear-attention falls back to torch (slower but works)
-- Unsloth skips sample packing for processor-based models — still fast enough on H200
+- **All Qwen3.5 models are VLMs** (`Qwen3_5ForConditionalGeneration`) — this causes compatibility issues with many training frameworks
+- Vast.ai scrubs inline `HF_TOKEN` env vars — must `export` separately
+- Vast.ai HF dataset cache (`/workspace/.hf_home/datasets`) can silently grow to 60GB+ and fill the disk — clean it after preprocessing
+- Use Vast.ai **shared drives** to persist datasets across instance swaps — avoids re-uploading 3.6GB+ each time
+- `dataset_num_proc` must be `1` for Qwen3.5 tokenizer (crashes with multiprocessing)
+- nvidia/OpenCodeReasoning R1 traces are 8K-32K tokens — NVIDIA trained at 32K context. Truncating to 4096 wastes most of the reasoning.
+- For the Axolotl template on Vast.ai, the telemetry whitelist file may be missing — fix with `echo 'organizations: []' > .../axolotl/telemetry/whitelist.yaml`
 
 ## Recommended Sampling Settings
 
-Validated through testing with [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) and [Kronk](https://github.com/danielcherubini/kronk) on an RTX 3080 10GB.
-
-| Profile | temperature | top_k | top_p | min_p | presence_penalty |
-|---------|-------------|-------|-------|-------|-----------------|
-| **Coding** | 0.6 | 20 | 0.95 | 0.0 | 0.0 |
-| **Chat** | 1.0 | 20 | 0.95 | 0.0 | 1.5 |
+| Parameter | Value |
+|-----------|-------|
+| temperature | 0.6 |
+| top_k | 20 |
+| top_p | 0.95 |
+| min_p | 0.0 |
+| presence_penalty | 0.0 |
+| repeat_penalty | 1.0 |
 
 > [!WARNING]
-> **Do not use temperature below 0.5** — low temperatures (e.g., 0.3) cause deterministic looping in multi-turn agentic use, where the model repeats the same tool call indefinitely.
+> **Do not use temperature below 0.5** — low temperatures cause deterministic looping in multi-turn agentic use.
 
 ### KV Cache Quantization
 
-For VRAM-constrained GPUs, use quantized KV cache keys/values:
+For VRAM-constrained GPUs:
 
 | Context Length | KV Cache | VRAM (Q4_K_M) | Generation Speed |
 |---------------|----------|---------------|-----------------|
 | 102,400 | f16/q4_0 | ~8.5 GB | ~111 tok/s |
 | 131,072 | f16/q4_0 | ~9.1 GB | ~110 tok/s |
 
-```bash
-# llama.cpp / ik_llama.cpp flags
--ctk f16 -ctv q4_0
-```
-
 ## Benchmarks
 
-Evaluated using [EvalPlus](https://github.com/evalplus/evalplus) against the Q4_K_M GGUF via ik_llama.cpp.
+### v1 (current release)
 
 | Model | HumanEval | HumanEval+ |
 |-------|-----------|------------|
 | Jackrong v2 (base) | 53.7% | — |
 | OmniCoder-9B | 36.0% | — |
-| **DeltaCoder-9B** (temp=0.6) | **50.6%** | **49.4%** |
-| DeltaCoder-9B (greedy) | 43.9% | 42.1% |
+| **DeltaCoder-9B v1** (temp=0.6) | **50.6%** | **49.4%** |
 
-DeltaCoder retains most of the base model's code reasoning ability while adding reliable tool-call JSON formatting. Use the recommended sampling settings (temp=0.6) — greedy decoding significantly underperforms.
+### Terminal-Bench (easy tasks)
 
-## v1.1-DPO (In Progress)
-
-DeltaCoder v1 scored **2/4 (50%) on [Terminal-Bench](https://github.com/terminal-bench/terminal-bench) easy tasks**. The two failures were:
-- `overfull-hbox`: hallucinated a word not in the allowed synonym list
-- `cobol-modernization`: bytes/int type error in generated code — didn't catch its own bug
-
-v1.1 applies **Direct Preference Optimization (DPO)** to improve code correctness and self-verification:
-
-| Step | Status |
-|------|--------|
-| Generate DPO pairs from AceCode-V2-122K (10K problems, 8 samples each) | ✅ Done — 4,519 pairs (45% keep rate) |
-| DPO training on Vast.ai H100 | ✅ Done — 3.7hrs, final loss 0.538 |
-| GGUF export (Q2_K → BF16, 13 quants) | ✅ Done |
-| HuggingFace release | ✅ Done |
-| HumanEval + Terminal-Bench evaluation | In progress |
-
-### v1.1 Training Plan
-
-| Parameter | Value |
-|-----------|-------|
-| Method | DPO (Direct Preference Optimization) |
-| Dataset | On-policy pairs from [AceCode-V2-122K](https://huggingface.co/datasets/TIGER-Lab/AceCode-V2-122K) |
-| Pair generation | 8 samples/problem, keep if ≥1 pass AND ≥1 fail |
-| Beta | 0.1 |
-| Loss type | sigmoid |
-| Hardware | Vast.ai H100 80GB |
-| Framework | Unsloth + TRL ≥0.19.0 |
-
-## Status
-
-- [x] Dataset research and format analysis
-- [x] Preprocessing scripts (238K rows from 4 datasets)
-- [x] Dry-run validation (layer names, chat template, VRAM)
-- [x] Training config (Axolotl -> Unsloth migration)
-- [x] Full LoRA fine-tune (50K CoderForge examples, H200, ~10hrs)
-- [x] GGUF export (Q4_K_M, Q5_K_M, Q6_K, Q8_0)
-- [x] HuggingFace release
-- [x] Benchmarking (HumanEval via EvalPlus)
-- [x] Terminal-Bench evaluation (2/4 easy tasks, 50%)
-- [x] DPO pair generation (4,519 pairs from AceCode-V2-122K)
-- [x] DPO fine-tune (v1.1, H100, ~3.7hrs)
-- [x] v1.1 GGUF export (Q2_K → BF16, 13 quants)
-- [x] v1.1 HuggingFace release
-- [ ] v1.1 HumanEval + Terminal-Bench evaluation (in progress)
+| Model | Score |
+|-------|-------|
+| DeltaCoder v1 | 2/4 (50%) |
+| DeltaCoder v1.1-DPO | 2/4 (50%) — different failure mode |
+| DeltaCoder v1.2 | TBD |
 
 ## Acknowledgements
 
-- [Unsloth](https://unsloth.ai) for Qwen3.5 training support
+- [Axolotl](https://github.com/axolotl-ai-cloud/axolotl) for sample packing and efficient training
 - [Together AI](https://together.ai) for the CoderForge dataset
-- [Jackrong](https://huggingface.co/Jackrong) for the base model
-- [NVIDIA](https://nvidia.com) for Nemotron datasets
-- [Nebius](https://nebius.com) for SWE-agent trajectories
+- [NVIDIA](https://nvidia.com) for OpenCodeReasoning and Nemotron datasets
+- [Salesforce](https://salesforce.com) for xlam function-calling dataset
+- [Qwen](https://huggingface.co/Qwen) for the Qwen3.5-9B base model
+- [Unsloth](https://unsloth.ai) for Qwen3.5 support (used in v1 and DPO)

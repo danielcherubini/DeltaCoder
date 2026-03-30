@@ -1,13 +1,13 @@
 """
 Merge all preprocessed datasets into a single training JSONL.
 
-Combines:
-  - data/coderforge_converted.jsonl    (~155K rows)
-  - data/nemotron_swe_converted.jsonl  (~51K rows)
-  - data/nemotron_agentic_converted.jsonl (~19K rows)
-  - data/sweagent_converted.jsonl      (~13K rows)
+v1.2 mix (all coding-focused):
+  - data/magicoder_converted.jsonl            (~50K — code generation)
+  - data/coderforge_converted.jsonl           (~50K — SWE-agent tool use)
+  - data/code_feedback_converted.jsonl        (~50K — multi-turn code revision)
+  - data/xlam_converted.jsonl                 (~15K — verified function calling)
 
-Shuffles the result and writes to data/train.jsonl.
+Shuffles the result and writes to data/v1.2_sft_train.jsonl.
 """
 
 import json
@@ -16,13 +16,11 @@ import sys
 from pathlib import Path
 
 INPUT_FILES = [
+    "data/opencoder_reasoning_converted.jsonl",
     "data/magicoder_converted.jsonl",
     "data/coderforge_converted.jsonl",
     "data/code_feedback_converted.jsonl",
-    "data/hermes_converted.jsonl",
-    "data/glaive_converted.jsonl",
-    "data/opus_reasoning_converted.jsonl",
-    "data/qwen35_reasoning_converted.jsonl",
+    "data/xlam_converted.jsonl",
 ]
 
 

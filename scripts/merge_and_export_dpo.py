@@ -1,20 +1,22 @@
 """
-DeltaCoder v1.1-DPO — Merge LoRA adapters + export to GGUF.
+DeltaCoder v1.2-DPO — Merge LoRA adapters + export to GGUF.
 
 Two-stage merge:
-  1. Qwen/Qwen3.5-9B + v1 SFT LoRA (danielcherubini/Qwen3.5-DeltaCoder-9B)
-     → merged_v1 (full bf16 weights)
-  2. merged_v1 + DPO LoRA (outputs/deltacoder-9b-dpo/lora_adapter)
-     → merged_v1.1 (full bf16 weights)
-  3. Convert merged_v1.1 → GGUF (f16)
+  1. Qwen/Qwen3.5-9B + v1.2 SFT LoRA → merged_v1.2 (or use pre-merged SFT model)
+  2. merged_v1.2 + DPO LoRA → merged_v1.2-dpo (full bf16 weights)
+  3. Convert → GGUF (f16)
   4. Quantize f16 → all quants
   5. Upload to HuggingFace (optional)
 
 Usage:
-    python scripts/merge_and_export_dpo.py
+    # If you have the pre-merged SFT model (from Phase 2):
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2
+
+    # If you have the SFT adapter:
+    python scripts/merge_and_export_dpo.py --sft-adapter ./outputs/deltacoder-9b-v1.2
 
     # With upload:
-    python scripts/merge_and_export_dpo.py --upload --hf-token <TOKEN>
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 --upload --hf-token <TOKEN>
 """
 
 import argparse
@@ -29,15 +31,21 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
+FILENAME_PREFIX = "DeltaCoder-9B-v1.2-DPO"
 QUANTS = [
-    # Q2_K, Q3_K_S, Q3_K_M, Q3_K_L, Q4_0, Q4_K_S already uploaded
+    "Q2_K",
+    "Q3_K_S",
+    "Q3_K_M",
+    "Q3_K_L",
+    "Q4_0",
+    "Q4_K_S",
     "Q4_K_M",  # 4-bit (recommended)
     "Q5_K_S",
     "Q5_0",
     "Q5_K_M",  # 5-bit
     "Q6_K",  # 6-bit
     "Q8_0",  # 8-bit
-    "BF16",  # 16-bit (raw, for high-VRAM users)
+    "BF16",  # 16-bit
 ]
 HF_GGUF_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF"
 HF_ADAPTER_REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B"
@@ -52,27 +60,33 @@ def parse_args():
         help="Base model HuggingFace ID",
     )
     parser.add_argument(
+        "--sft-model",
+        type=str,
+        default=None,
+        help="Path to pre-merged SFT model (skips SFT LoRA merge step)",
+    )
+    parser.add_argument(
         "--sft-adapter",
         type=str,
-        default="danielcherubini/Qwen3.5-DeltaCoder-9B",
-        help="v1 SFT LoRA adapter (HF repo or local path)",
+        default="./outputs/deltacoder-9b-v1.2",
+        help="v1.2 SFT LoRA adapter (used if --sft-model not set)",
     )
     parser.add_argument(
         "--dpo-adapter",
         type=str,
-        default="./outputs/deltacoder-9b-dpo/lora_adapter",
+        default="./outputs/deltacoder-9b-v1.2-dpo/lora_adapter",
         help="DPO LoRA adapter (local path)",
     )
     parser.add_argument(
         "--merged-dir",
         type=str,
-        default="./outputs/deltacoder-9b-dpo-merged",
+        default="./outputs/deltacoder-9b-v1.2-dpo-merged",
         help="Output directory for merged bf16 model",
     )
     parser.add_argument(
         "--gguf-dir",
         type=str,
-        default="./outputs/deltacoder-9b-dpo-gguf",
+        default="./outputs/deltacoder-9b-v1.2-dpo-gguf",
         help="Output directory for GGUF files",
     )
     parser.add_argument(
@@ -176,22 +190,36 @@ def main():
     Path(gguf_dir).mkdir(parents=True, exist_ok=True)
     Path(merged_dir).mkdir(parents=True, exist_ok=True)
 
-    # ---------- Step 1: Load base model ----------
-    print(f"\n=== Step 1: Loading base model {args.base_model} ===")
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=torch.bfloat16,
-        device_map="cpu",
-        trust_remote_code=True,
-        attn_implementation="eager",
-    )
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+    # ---------- Step 1-2: Load SFT model ----------
+    if args.sft_model:
+        print(f"\n=== Step 1-2: Loading pre-merged SFT model from {args.sft_model} ===")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.sft_model,
+            torch_dtype=torch.bfloat16,
+            device_map="cpu",
+            trust_remote_code=True,
+            attn_implementation="eager",
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.sft_model, trust_remote_code=True
+        )
+    else:
+        print(f"\n=== Step 1: Loading base model {args.base_model} ===")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            torch_dtype=torch.bfloat16,
+            device_map="cpu",
+            trust_remote_code=True,
+            attn_implementation="eager",
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.base_model, trust_remote_code=True
+        )
 
-    # ---------- Step 2: Merge v1 SFT LoRA ----------
-    print(f"\n=== Step 2: Merging v1 SFT LoRA ({args.sft_adapter}) ===")
-    model = PeftModel.from_pretrained(model, args.sft_adapter)
-    model = model.merge_and_unload()
-    print("v1 SFT LoRA merged.")
+        print(f"\n=== Step 2: Merging SFT LoRA ({args.sft_adapter}) ===")
+        model = PeftModel.from_pretrained(model, args.sft_adapter)
+        model = model.merge_and_unload()
+        print("SFT LoRA merged.")
 
     # ---------- Step 3: Merge DPO LoRA ----------
     print(f"\n=== Step 3: Merging DPO LoRA ({args.dpo_adapter}) ===")
@@ -223,7 +251,7 @@ def main():
     setup_llama_cpp(args.llama_cpp_dir)
 
     # ---------- Step 7: Convert to GGUF (f16) ----------
-    f16_gguf = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-f16.gguf"
+    f16_gguf = f"{gguf_dir}/{FILENAME_PREFIX}-f16.gguf"
     print(f"\n=== Step 7: Converting to GGUF (f16) → {f16_gguf} ===")
     run(
         f"python {args.llama_cpp_dir}/convert_hf_to_gguf.py {merged_dir} "
@@ -249,11 +277,12 @@ def main():
             sys.exit(1)
 
     for quant in QUANTS:
+        out = f"{gguf_dir}/{FILENAME_PREFIX}-{quant}.gguf"
         if quant == "BF16":
-            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-BF16.gguf"
-            run(f"cp {f16_gguf} {out}")
+            # Use llama-quantize to convert f16 → bf16 (not just a copy)
+            print(f"  Converting to BF16...")
+            run(f"{quantize_bin} {f16_gguf} {out} BF16")
         else:
-            out = f"{gguf_dir}/DeltaCoder-9B-v1.1-DPO-{quant}.gguf"
             print(f"  Quantizing {quant}...")
             run(f"{quantize_bin} {f16_gguf} {out} {quant}")
 
@@ -286,6 +315,7 @@ def main():
         api = HfApi(token=token)
         api.upload_folder(
             folder_path=args.dpo_adapter,
+            path_in_repo="dpo_adapter/",
             repo_id=HF_ADAPTER_REPO,
             repo_type="model",
         )

@@ -25,7 +25,7 @@ import copy
 
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
-MAX_SEQ_LENGTH = 4096
+MAX_SEQ_LENGTH = 2048
 OUTPUT_DIR = "./outputs/deltacoder-9b-v1.2"
 LORA_R = 64
 LORA_ALPHA = 32
@@ -145,12 +145,11 @@ def main():
 
         def __init__(self, model, processor):
             super().__init__(model, processor)
-            # Get the assistant header tokens to find where assistant responses start
-            self._asst_header = processor.encode(
-                "<|im_start|>assistant\n", add_special_tokens=False
-            )
-            self._end_token = processor.encode("<|im_end|>", add_special_tokens=False)
-            self._think_start = processor.encode("<think>", add_special_tokens=False)
+            # Token sequences will be set after construction using plain_tok
+            self._asst_header = []
+            self._end_token = []
+            self._think_start = []
+            self._diag_count = 0  # for diagnostic logging
 
         def __call__(self, examples):
             batch = super().__call__(examples)
@@ -189,9 +188,21 @@ def main():
                         j += 1
 
                 batch["labels"][i] = labels
+
+            # Diagnostic: print masking stats for first 2 batches
+            if self._diag_count < 2:
+                self._diag_count += 1
+                for i in range(batch["input_ids"].shape[0]):
+                    total = (batch["input_ids"][i] != 0).sum().item()  # non-pad
+                    unmasked = (batch["labels"][i] != -100).sum().item()
+                    pct = 100.0 * unmasked / total if total > 0 else 0
+                    print(
+                        f"  [DIAG] batch {self._diag_count} sample {i}: "
+                        f"{unmasked}/{total} tokens unmasked ({pct:.1f}%)"
+                    )
             return batch
 
-    # Use plain tokenizer for encoding header tokens (Unsloth's is a processor)
+    # Plain tokenizer for encoding header token sequences (not for the collator)
     plain_tok = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
     # ---------- Trainer ----------
@@ -199,8 +210,8 @@ def main():
     FastVisionModel.for_training(model)
 
     sft_config_kwargs = dict(
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,  # effective batch = 16
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,  # effective batch = 32
         warmup_ratio=0.05,
         num_train_epochs=1,
         logging_steps=10,
@@ -225,23 +236,19 @@ def main():
     if args.max_steps > 0:
         sft_config_kwargs["max_steps"] = args.max_steps
 
-    collator = MaskedVisionDataCollator(model, plain_tok)
+    # Pass the Unsloth tokenizer (vision processor) to the collator — NOT plain_tok
+    collator = MaskedVisionDataCollator(model, tokenizer)
+    # Store plain_tok on the collator for header token encoding
+    collator._asst_header = plain_tok.encode(
+        "<|im_start|>assistant\n", add_special_tokens=False
+    )
+    collator._end_token = plain_tok.encode("<|im_end|>", add_special_tokens=False)
+    collator._think_start = plain_tok.encode("<think>", add_special_tokens=False)
 
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
         data_collator=collator,
-        train_dataset=dataset,
-        args=SFTConfig(**sft_config_kwargs),
-    )
-
-    if args.max_steps > 0:
-        sft_config_kwargs["max_steps"] = args.max_steps
-
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        data_collator=UnslothVisionDataCollator(model, tokenizer),
         train_dataset=dataset,
         args=SFTConfig(**sft_config_kwargs),
     )
