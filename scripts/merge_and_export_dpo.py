@@ -347,7 +347,7 @@ Next steps:
        rsync -avP <instance>:{gguf_dir}/*.gguf ./
 
   2. Test with ik_llama:
-       ./ik_llama-server -m DeltaCoder-9B-v1.1-DPO-Q4_K_M.gguf -ngl 999 -c 4096 -fa 1 --jinja --port 8080
+       ./ik_llama-server -m {filename_prefix}-Q4_K_M.gguf -ngl 999 -c 4096 -fa 1 --jinja --port 8080
 
   3. Upload to HuggingFace:
        python scripts/merge_and_export_dpo.py --upload --hf-token <TOKEN>
