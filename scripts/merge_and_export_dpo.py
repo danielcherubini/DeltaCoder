@@ -1,22 +1,26 @@
 """
-DeltaCoder v1.2-DPO — Merge LoRA adapters + export to GGUF.
+DeltaCoder — Merge LoRA adapters + export to GGUF.
 
 Two-stage merge:
-  1. Qwen/Qwen3.5-9B + v1.2 SFT LoRA → merged_v1.2 (or use pre-merged SFT model)
-  2. merged_v1.2 + DPO LoRA → merged_v1.2-dpo (full bf16 weights)
+  1. Qwen/Qwen3.5-9B + SFT LoRA → merged SFT (or use pre-merged SFT model)
+  2. merged SFT + DPO LoRA → merged DPO (full bf16 weights)
   3. Convert → GGUF (f16)
   4. Quantize f16 → all quants
   5. Upload to HuggingFace (optional)
 
 Usage:
-    # If you have the pre-merged SFT model (from Phase 2):
-    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2
+    # v1.2 — pre-merged SFT model:
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
+        --filename-prefix DeltaCoder-9B-v1.2-DPO
 
-    # If you have the SFT adapter:
-    python scripts/merge_and_export_dpo.py --sft-adapter ./outputs/deltacoder-9b-v1.2
-
-    # With upload:
-    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 --upload --hf-token <TOKEN>
+    # v1.3 — pre-merged SFT model, keep merged for eval before teardown:
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.3 \
+        --dpo-adapter ./outputs/deltacoder-9b-v1.3-dpo/lora_adapter \
+        --merged-dir ./outputs/deltacoder-9b-v1.3-merged \
+        --gguf-dir ./outputs/deltacoder-9b-v1.3-gguf \
+        --filename-prefix DeltaCoder-9B-v1.3-DPO \
+        --llama-cpp-dir /workspace/llama.cpp \
+        --keep-merged --upload --hf-token $HF_TOKEN
 """
 
 import argparse
@@ -31,7 +35,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
-FILENAME_PREFIX = "DeltaCoder-9B-v1.2-DPO"
+FILENAME_PREFIX_DEFAULT = "DeltaCoder-9B-v1.2-DPO"
 QUANTS = [
     "Q2_K",
     "Q3_K_S",
@@ -94,6 +98,17 @@ def parse_args():
         type=str,
         default="./llama.cpp",
         help="Path to llama.cpp directory (will be cloned if not present)",
+    )
+    parser.add_argument(
+        "--filename-prefix",
+        type=str,
+        default=FILENAME_PREFIX_DEFAULT,
+        help="Prefix for GGUF filenames (e.g. DeltaCoder-9B-v1.3-DPO)",
+    )
+    parser.add_argument(
+        "--keep-merged",
+        action="store_true",
+        help="Do not delete the merged bf16 model after f16 conversion (useful for eval before teardown)",
     )
     parser.add_argument(
         "--skip-sanity",
@@ -187,6 +202,7 @@ def main():
 
     merged_dir = args.merged_dir
     gguf_dir = args.gguf_dir
+    filename_prefix = args.filename_prefix
     Path(gguf_dir).mkdir(parents=True, exist_ok=True)
     Path(merged_dir).mkdir(parents=True, exist_ok=True)
 
@@ -251,16 +267,20 @@ def main():
     setup_llama_cpp(args.llama_cpp_dir)
 
     # ---------- Step 7: Convert to GGUF (f16) ----------
-    f16_gguf = f"{gguf_dir}/{FILENAME_PREFIX}-f16.gguf"
+    f16_gguf = f"{gguf_dir}/{filename_prefix}-f16.gguf"
     print(f"\n=== Step 7: Converting to GGUF (f16) → {f16_gguf} ===")
     run(
         f"python {args.llama_cpp_dir}/convert_hf_to_gguf.py {merged_dir} "
         f"--outfile {f16_gguf} --outtype f16"
     )
 
-    # Delete merged model immediately after f16 conversion — no longer needed
-    print(f"  Removing merged model to free disk ({merged_dir})...")
-    run(f"rm -rf {merged_dir}")
+    # Delete merged model after f16 conversion unless --keep-merged is set
+    if args.keep_merged:
+        print(f"  Keeping merged model at {merged_dir} (--keep-merged set).")
+        print(f"  Remember to delete it manually after eval: rm -rf {merged_dir}")
+    else:
+        print(f"  Removing merged model to free disk ({merged_dir})...")
+        run(f"rm -rf {merged_dir}")
 
     # ---------- Step 8: Quantize + upload-and-delete each quant ----------
     print("\n=== Step 8: Generating quantized GGUFs ===")
@@ -277,7 +297,7 @@ def main():
             sys.exit(1)
 
     for quant in QUANTS:
-        out = f"{gguf_dir}/{FILENAME_PREFIX}-{quant}.gguf"
+        out = f"{gguf_dir}/{filename_prefix}-{quant}.gguf"
         if quant == "BF16":
             # Use llama-quantize to convert f16 → bf16 (not just a copy)
             print(f"  Converting to BF16...")
