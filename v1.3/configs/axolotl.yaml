@@ -11,13 +11,13 @@
 #   (same as v1.2 — Axolotl template already has all deps)
 #
 # Pre-tokenize first:
-#   python v1.3/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
+#   python v1.3/scripts/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
 #
 # Dry run FIRST to verify memory at 32768:
-#   accelerate launch -m axolotl.cli.train v1.3/axolotl.yaml --max_steps=20
+#   accelerate launch -m axolotl.cli.train v1.3/configs/axolotl.yaml --max_steps=20
 #
 # Full run:
-#   nohup accelerate launch -m axolotl.cli.train v1.3/axolotl.yaml \
+#   nohup accelerate launch -m axolotl.cli.train v1.3/configs/axolotl.yaml \
 #     > logs/v1.3_axolotl_train.log 2>&1 &
 
 base_model: Qwen/Qwen3.5-9B

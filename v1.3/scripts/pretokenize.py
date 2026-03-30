@@ -16,7 +16,7 @@ Output: JSONL with {input_ids, attention_mask, labels} — ready for Axolotl wit
 Labels: -100 for system/user tokens (masked), token IDs for assistant tokens (trained on).
 
 Usage:
-    python v1.3/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
+    python v1.3/scripts/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
 """
 
 import json
