@@ -11,22 +11,30 @@
 
 ```
 DeltaCoder/
-├── configs/           # Axolotl training configs (v1.2, v1.3)
-├── data/              # Raw training data (train.jsonl, dpo_pairs)
-├── docs/              # Documentation
-├── logs/              # Training logs
-├── outputs/           # Checkpoints, merged models
-├── scripts/           # v1.2 scripts (pretokenize.py, train_dpo.py, merge_and_export_dpo.py)
+├── v1.1/
+│   ├── configs/       # v1.1 Axolotl configs (SFT + DPO)
+│   ├── scripts/       # v1.1 scripts (train_unsloth, merge_and_export, etc.)
+│   ├── data/          # v1.1 DPO pairs (gitignored)
+│   ├── outputs/       # v1.1 DPO adapter (gitignored)
+│   └── logs/          # v1.1 training logs (gitignored)
+├── v1.2/
+│   ├── configs/       # v1.2 Axolotl SFT config
+│   ├── scripts/       # v1.2 scripts (pretokenize, train_dpo, preprocess_*, etc.)
+│   ├── data/          # v1.2 SFT training data + preprocessed datasets (gitignored)
+│   ├── lora_adapter/  # v1.2 SFT LoRA adapter (gitignored)
+│   ├── merged/        # v1.2 merged SFT model (17GB, gitignored)
+│   └── v1.2_axolotl_train.log
 ├── v1.3/
 │   ├── configs/       # v1.3 Axolotl config (sequence_len=32768)
 │   └── scripts/       # v1.3 scripts (pretokenize.py with 32K context)
+├── docs/              # Documentation + plans
 ├── AGENTS.md          # This file
 └── README.md
 ```
 
 ## 3. Vast.ai Instance
 
-**Connect**: `ssh -T -o StrictHostKeyChecking=no -p 28988 root@213.5.130.43`
+**Connect**: `ssh -T -o StrictHostKeyChecking=no -p 28137 root@213.5.130.43`
 
 **Find new instances**: `vastai search offers 'gpu_name=H200 num_gpus=1 dph<2.0'`
 
@@ -48,6 +56,67 @@ df -h
 ### NEVER use:
 - **Unsloth DPOTrainer** — crashes with `KeyError: 'images'` on Qwen3.5 VLM
 - **flash_attention_2** with Qwen3.5 GDN — causes `cudaErrorIllegalAddress`
+- **vLLM stable releases** for Qwen3.5-9B — stable versions (0.11.0, 0.18.1) fail weight loading. **Must use vLLM nightly** (`uv pip install --pre -U vllm --extra-index-url https://wheels.vllm.ai/nightly`)
+
+### Use vLLM nightly for inference (DPO pair generation):
+
+Qwen3.5-9B text-only fine-tunes require special handling for vLLM:
+
+1. **Separate venv** with vLLM nightly + transformers 5.x (system vLLM has transformers 4.57 which doesn't know `qwen3_5_text`)
+2. **Wrapped config** — the merged SFT model outputs a flat `qwen3_5_text` config, but vLLM only supports the VL wrapper format (`qwen3_5` + `Qwen3_5ForConditionalGeneration` + `text_config`). Wrap using the official Qwen3.5-9B config as template.
+3. **`--language-model-only`** flag to skip vision encoder loading
+4. **First run JIT-compiles** FlashInfer GDN prefill kernels (~15min one-time cost)
+
+**Setup venv (one-time):**
+```bash
+uv venv /workspace/vllm-env
+source /workspace/vllm-env/bin/activate
+uv pip install --pre -U vllm --extra-index-url https://wheels.vllm.ai/nightly
+uv pip install 'transformers>=5.0'
+```
+
+**Wrap config.json (one-time, after SFT merge):**
+```python
+import json
+from huggingface_hub import hf_hub_download
+
+# Get official VL config as template
+path = hf_hub_download('Qwen/Qwen3.5-9B', 'config.json')
+with open(path) as f:
+    official = json.load(f)
+
+# Read flat text config from merged model
+with open('/workspace/merged_v1.2/config.json') as f:
+    text_config = json.load(f)
+
+# Wrap it: text_config goes inside the VL wrapper
+official['text_config'] = text_config
+with open('/workspace/merged_v1.2/config.json', 'w') as f:
+    json.dump(official, f, indent=2)
+```
+
+Also fix `tokenizer_config.json` if it has `"tokenizer_class": "TokenizersBackend"` (axolotl artifact — remove that key).
+
+**Serve:**
+```bash
+source /workspace/vllm-env/bin/activate
+vllm serve /workspace/merged_v1.2 \
+    --port 18000 --host 0.0.0.0 \
+    --max-model-len 4096 \
+    --gpu-memory-utilization 0.90 \
+    --enable-prefix-caching \
+    --reasoning-parser qwen3 \
+    --dtype auto \
+    --language-model-only
+```
+
+**Fallback:** If vLLM still fails, use ik_llama.cpp (build from main, NOT release):
+```bash
+git clone https://github.com/ikawrakow/ik_llama.cpp /workspace/ik_llama.cpp
+cd /workspace/ik_llama.cpp && cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j
+python3 /workspace/llama.cpp/convert_hf_to_gguf.py /workspace/merged_v1.2 --outfile /workspace/merged_v1.2.Q8_0.gguf --outtype q8_0
+/workspace/ik_llama.cpp/build/bin/llama-server -m /workspace/merged_v1.2.Q8_0.gguf --port 18000 --host 0.0.0.0 -ngl 999 -c 4096 --jinja -fa
+```
 
 ### ALWAYS use:
 - `attn_implementation: sdpa` (SDPA, not flash_attention)
@@ -110,9 +179,10 @@ def main():
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/pretokenize.py` | Tokenize v1.2 data (8192 context) |
-| `scripts/train_dpo.py` | DPO training on top of SFT-merged model |
-| `scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
+| `v1.2/scripts/pretokenize.py` | Tokenize v1.2 data (8192 context) |
+| `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
+| `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
+| `v1.2/scripts/generate_dpo_pairs.py` | Generate on-policy DPO pairs via OpenAI-compatible API |
 | `v1.3/scripts/pretokenize.py` | Tokenize v1.3 data (32768 context) |
 
 ## 7. Training Monitoring
@@ -141,17 +211,20 @@ grep -E "^\s*loss:" logs/v1.3_axolotl_train.log | tail -n 50
 ## 10. Quick Commands
 
 ```bash
-# v1.2 DPO training
-python scripts/train_dpo.py --sft-model /workspace/merged_v1.2
+# v1.2 DPO training (on-policy only)
+python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2
+
+# v1.2 DPO training (on-policy + 50K Ling-Coder-DPO)
+python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2 --ling-coder 50000
 
 # v1.3 pretokenize (32K context)
-python v1.3/scripts/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
+python v1.3/scripts/pretokenize.py v1.2/data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
 
 # Dry run v1.3 (verify memory)
 accelerate launch -m axolotl.cli.train v1.3/configs/axolotl.yaml --max_steps=20
 
 # Merge + export to GGUF
-python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
+python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
     --dpo-adapter ./outputs/deltacoder-9b-v1.2-dpo/lora_adapter \
     --merged-dir ./outputs/deltacoder-9b-v1.2-dpo-merged \
     --gguf-dir ./outputs/deltacoder-9b-v1.2-dpo-gguf \

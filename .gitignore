@@ -1,7 +1,22 @@
 __pycache__/
 *.pyc
 .venv/
-data/
 last_run_prepared/
-outputs/
 *.gguf
+
+# v1.1 large artifacts
+v1.1/data/
+v1.1/outputs/
+v1.1/logs/
+
+# v1.2 large artifacts (adapter weights, merged model, training data)
+v1.2/lora_adapter/
+v1.2/merged/
+v1.2/data/
+v1.2/*.log
+
+# v1.3 large artifacts
+v1.3/lora_adapter/
+v1.3/merged/
+v1.3/data/
+v1.3/*.log

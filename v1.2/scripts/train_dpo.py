@@ -12,6 +12,9 @@ Usage:
 
     # Full training:
     python scripts/train_dpo.py --sft-model /workspace/merged_v1.2
+
+    # Full training + Ling-Coder-DPO mix (253K coding preference pairs):
+    python scripts/train_dpo.py --sft-model /workspace/merged_v1.2 --ling-coder 50000
 """
 
 import argparse
@@ -82,6 +85,13 @@ def parse_args():
         default="./outputs/deltacoder-9b-v1.2-dpo",
         help="Output directory for checkpoints and final adapter",
     )
+    parser.add_argument(
+        "--ling-coder",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Mix in N rows from inclusionAI/Ling-Coder-DPO (0 = disabled)",
+    )
     return parser.parse_args()
 
 
@@ -95,6 +105,27 @@ def load_dpo_dataset(path: str) -> Dataset:
                 records.append(json.loads(line))
     print(f"Loaded {len(records)} preference pairs from {path}")
     return Dataset.from_list(records)
+
+
+def load_ling_coder_dpo(max_rows: int = 0) -> Dataset:
+    """Load inclusionAI/Ling-Coder-DPO and convert flat strings to conversational format."""
+    from datasets import load_dataset as hf_load
+
+    print("Loading inclusionAI/Ling-Coder-DPO from HuggingFace...")
+    ds = hf_load("inclusionAI/Ling-Coder-DPO", split="train", trust_remote_code=True)
+    if max_rows > 0:
+        ds = ds.shuffle(seed=42).select(range(min(max_rows, len(ds))))
+
+    def to_conversational(row):
+        return {
+            "prompt": [{"role": "user", "content": row["prompt"]}],
+            "chosen": [{"role": "assistant", "content": row["chosen"]}],
+            "rejected": [{"role": "assistant", "content": row["rejected"]}],
+        }
+
+    ds = ds.map(to_conversational, remove_columns=["mid"])
+    print(f"Loaded {len(ds)} Ling-Coder-DPO pairs (conversational format)")
+    return ds
 
 
 def main():
@@ -155,6 +186,13 @@ def main():
     # ---------- Dataset ----------
     print("Loading DPO pairs...")
     dataset = load_dpo_dataset(args.data)
+
+    if args.ling_coder > 0:
+        from datasets import concatenate_datasets
+
+        ling_ds = load_ling_coder_dpo(max_rows=args.ling_coder)
+        dataset = concatenate_datasets([dataset, ling_ds]).shuffle(seed=3407)
+        print(f"Combined dataset: {len(dataset)} pairs")
 
     # ---------- DPO Config ----------
     dpo_config_kwargs = dict(
