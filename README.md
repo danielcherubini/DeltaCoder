@@ -46,10 +46,11 @@ Complete retrain from clean `Qwen/Qwen3.5-9B` base with a curated, 100% coding-f
 | Step | Status |
 |------|--------|
 | Dataset preprocessing (5 datasets → 230K rows) | ✅ Done |
-| SFT training (Axolotl, H200 141GB, batch=1+packing) | 🔄 Running (~46hrs, ~$87) |
-| On-policy DPO pair generation | ⏳ Pending |
-| DPO training | ⏳ Pending |
-| GGUF export + HuggingFace upload | ⏳ Pending |
+| SFT training (Axolotl, H200 141GB, batch=1+packing) | ✅ Done (~46hrs, ~$87) |
+| On-policy DPO pair generation (4,521 pairs, 45.2% keep) | ✅ Done |
+| DPO training (H200, TRL 1.0 + PEFT) | 🔄 Running |
+| Merge + GGUF export (local, CPU) | ⏳ Pending |
+| HuggingFace upload | ⏳ Pending |
 | Terminal-Bench + HumanEval evaluation | ⏳ Pending |
 
 ### v1.1-DPO
@@ -129,25 +130,30 @@ model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
 ## Project Structure
 
 ```
-configs/
-  deltacoder-9b-lora.yaml           # Axolotl config (v1, legacy)
-  deltacoder-9b-lora-v1.2.yaml      # Axolotl config (v1.2)
-  deltacoder-9b-dpo.yaml            # DPO hyperparameter reference
-scripts/
-  pretokenize.py                     # Pre-tokenization with assistant masking
-  train_unsloth.py                   # Unsloth SFT (v1, deprecated for v1.2)
-  train_dpo.py                       # DPO training (HF+PEFT+TRL)
-  generate_dpo_pairs.py              # On-policy DPO pair generation (async)
-  merge_and_export_dpo.py            # Two-stage LoRA merge + GGUF export
-  preprocess_opencoder_reasoning.py  # nvidia/OpenCodeReasoning → JSONL
-  preprocess_magicoder.py            # Magicoder → JSONL
-  preprocess_coderforge.py           # CoderForge XML → OpenAI JSON
-  preprocess_code_feedback.py        # Code-Feedback → JSONL
-  preprocess_xlam.py                 # xlam function calling → JSONL
-  merge_datasets.py                  # Combine and shuffle all datasets
+v1.1/
+  configs/                           # v1.1 Axolotl configs (SFT + DPO)
+  scripts/                           # v1.1 scripts (train_unsloth, merge_and_export)
+  data/                              # v1.1 DPO pairs (gitignored)
+  outputs/                           # v1.1 DPO adapter (gitignored)
+  logs/                              # v1.1 training logs (gitignored)
+v1.2/
+  configs/
+    deltacoder-9b-lora-v1.2.yaml     # Axolotl SFT config
+  scripts/
+    train_dpo.py                     # DPO training (HF+PEFT+TRL, no Unsloth)
+    generate_dpo_pairs.py            # On-policy DPO pair generation (async)
+    merge_and_export_dpo.py          # LoRA merge + GGUF export
+    pretokenize.py                   # Pre-tokenization (8192 context)
+    preprocess_*.py                  # Dataset preprocessing scripts
+    merge_datasets.py                # Combine and shuffle all datasets
+  data/                              # v1.2 SFT data + preprocessed datasets (gitignored)
+  merged/                            # v1.2 merged SFT model (17GB, gitignored)
+  lora_adapter/                      # v1.2 SFT LoRA adapter (gitignored)
+v1.3/
+  configs/axolotl.yaml               # 32768 sequence length config
+  scripts/pretokenize.py             # 32K context pretokenization
 data/
-  v1.2_sft_train.jsonl               # Merged 230K training set
-  dpo_pairs.jsonl                    # v1.1 DPO pairs
+  dpo_pairs_v1.2.jsonl               # v1.2 DPO pairs (4,521 pairs)
 docs/
   plans/                             # Implementation plans
 ```

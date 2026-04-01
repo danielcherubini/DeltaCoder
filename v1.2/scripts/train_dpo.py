@@ -139,6 +139,7 @@ def main():
             args.sft_model,
             torch_dtype=torch.bfloat16,
             attn_implementation="sdpa",
+            device_map="auto",
             trust_remote_code=True,
         )
         tokenizer = AutoTokenizer.from_pretrained(
@@ -150,6 +151,7 @@ def main():
             BASE_MODEL_NAME,
             torch_dtype=torch.bfloat16,
             attn_implementation="sdpa",
+            device_map="auto",
             trust_remote_code=True,
         )
         model = PeftModel.from_pretrained(model, args.sft_adapter)

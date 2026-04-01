@@ -34,9 +34,20 @@ DeltaCoder/
 
 ## 3. Vast.ai Instance
 
-**Connect**: `ssh -T -o StrictHostKeyChecking=no -p 28137 root@213.5.130.43`
+**Connect**: `ssh -T -o StrictHostKeyChecking=no -p 20488 root@213.5.130.43`
+**Template**: PyTorch Development Environment (CUDA 12.8)
+**Venv**: `/venv/main/` (auto-activated on SSH)
 
 **Find new instances**: `vastai search offers 'gpu_name=H200 num_gpus=1 dph<2.0'`
+
+### CRITICAL: flash-linear-attention is REQUIRED for training
+
+Without `flash-linear-attention` + `causal-conv1d`, Qwen3.5's GDN layers (24/32) fall back to
+slow torch CPU implementation → 0% GPU utilization, training takes days instead of hours.
+- `flash-linear-attention`: pure Python wheel, installs instantly
+- `causal-conv1d`: requires CUDA compilation (~20-45 min depending on CPU)
+- Install with: `pip install causal-conv1d flash-linear-attention --no-build-isolation`
+- MUST use `--no-build-isolation` to avoid pip pulling wrong PyTorch/CUDA version
 
 **Monitoring commands**:
 ```bash
