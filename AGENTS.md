@@ -36,64 +36,39 @@ DeltaCoder/
 ## 3. Vast.ai Infrastructure
 
 ### Current Instance
-**Connect**: `ssh -T -o StrictHostKeyChecking=no -p <PORT> root@<VAST_IP>`
-**Image**: `nvcr.io/nvidia/pytorch:26.01-py3` (PyTorch NGC)
-**Volume**: 300GB persistent volume mounted at `/workspace/`
+**No active instance or volume.** All Vast.ai resources torn down (2026-04-02).
 
-### Instance Creation (with persistent volume)
+### Instance Creation (no volume — use local disk)
 ```bash
 # Search for H100 SXM offers (US/EU only for latency, skip host 68137 — broken SSH)
 vastai search offers 'gpu_name=H100_SXM num_gpus=1 dph<2.5 reliability>0.95 geolocation in [US,DE,NL,GB,CZ]' --order 'dph' --raw
 
-# Create instance WITH persistent volume (volume survives instance destruction)
+# Create instance with 80GB local disk (no volume needed — bootstrap from scratch)
 vastai create instance <OFFER_ID> \
-  --image nvcr.io/nvidia/pytorch:26.01-py3 \
-  --env '-e DATA_DIRECTORY="/workspace/" -e JUPYTER_DIR="/"' \
-  --onstart-cmd 'env >> /etc/environment;mkdir -p ${DATA_DIRECTORY:-/workspace};' \
-  --disk 16 \
-  --create-volume <VOLUME_ASK_ID> --volume-size 300 --mount-path '/workspace' \
+  --image vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26 \
+  --env '-e DATA_DIRECTORY="/workspace/"' \
+  --disk 80 \
   --ssh --direct
 
-# Copy files to/from instances (better than scp)
-vastai copy local:path/to/file C.<INSTANCE_ID>:/workspace/
-vastai copy C.<INSTANCE_ID>:/workspace/output local:output/
+# Then SSH in and bootstrap:
+curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/provision.sh
+bash /workspace/provision.sh
+# Upload pre-tokenized data:
+scp -P <PORT> v1.2/data/v1.2_pretokenized/*.parquet root@<IP>:/workspace/v1.2_pretokenized/
 ```
 
-### Volume Strategy
-Persistent volume at `/workspace/` holds all data, scripts, models, and checkpoints.
-Survives instance destruction — can swap templates without re-uploading.
+**NOTE:** The `PROVISIONING_SCRIPT` env var does NOT auto-run on the `vastai/pytorch` image.
+Must download and run `provision.sh` manually after SSH.
 
-**Current volume**: ID 33974210, 300GB, host 260094 (US), $0.20/GB/mo
+### Volume Strategy (DEPRECATED)
+Previous approach used persistent volumes, but they are fragile on Vast.ai:
+- `--create-volume` needs a volume ask on the EXACT same machine as the offer
+- `--link-volume` often fails with "access denied" even on the same host
+- Volume storage costs $0.20/GB/mo ($60/mo for 300GB)
 
-**Swapping templates on the same volume:**
-```bash
-# Destroy instance (volume persists)
-vastai destroy instance <INSTANCE_ID>
-
-# Recreate on same host with different image, reattach volume
-# NOTE: --link-volume may fail with "access denied" if the offer ID doesn't match
-# the volume's host. Use an offer on the SAME host (check host_id in offer search).
-# Also: the first offer ID tried (33748664) failed with access denied even on the
-# same host. The second offer (32856289) on the same host worked. May be a timing/
-# caching issue — try a different offer on the same host if one fails.
-vastai create instance <OFFER_ID> \
-  --image <NEW_IMAGE> \
-  --link-volume <VOLUME_ID> \
-  --mount-path '/workspace' \
-  --ssh --direct
-```
-
-**Volume contents:**
-```
-/workspace/
-├── venv/                    # Python venv (persists across restarts)
-├── v1.2_sft_train.jsonl     # 262K training rows (5.1GB)
-├── train_unsloth.py         # SFT training script
-├── patch_vlm_packing.py     # VLM packing unblock patch
-├── outputs/                 # LoRA adapters + checkpoints
-├── merged_v1.2/             # Merged SFT model (~18GB)
-└── logs/                    # Training logs
-```
+**New approach:** Use 80GB local disk + bootstrap from scratch via `provision.sh`.
+The provisioning script installs everything in ~4 minutes. Pre-tokenized data (4.4GB)
+is uploaded via scp. No persistent volume needed.
 
 ### Versioned Templates (for future phases)
 Vast.ai has version-tagged Docker images with precise CUDA/PyTorch/Python combinations:
@@ -109,20 +84,18 @@ Vast.ai has version-tagged Docker images with precise CUDA/PyTorch/Python combin
 - `TENSORBOARD_LOG_DIR`: Customize Tensorboard log dir (defaults to /workspace)
 - `ENABLE_HTTPS`: Force HTTPS connections
 
-The `PROVISIONING_SCRIPT` is powerful — point it at a gist that installs unsloth + deps
-and the instance is ready to train on boot. No manual SSH setup needed.
+The `PROVISIONING_SCRIPT` env var does NOT auto-run on the `vastai/pytorch` image despite docs.
+Must download and run `provision.sh` manually after SSH.
 
-**Provisioning script**: `v1.2/scripts/provision.sh` — installs unsloth, causal-conv1d,
-flash-linear-attention into `/workspace/venv/`, applies VLM packing patch. Use with:
-```bash
-vastai create instance <OFFER_ID> \
-  --image vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26 \
-  --env '-e PROVISIONING_SCRIPT="https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/provision.sh" -e DATA_DIRECTORY="/workspace/"' \
-  --disk 16 \
-  --link-volume <VOLUME_ID> \
-  --mount-path '/workspace' \
-  --ssh --direct
-```
+**Provisioning script**: `v1.2/scripts/provision.sh` — **validated 2026-04-02**, installs
+everything in ~4 minutes on a fresh H100 instance:
+1. Creates Python 3.12 venv at `/workspace/venv/`
+2. Installs Unsloth 2026.3.18 + all dependencies
+3. Clones + patches causal-conv1d for SM 9.0 only (~3 min compile)
+4. Installs flash-linear-attention
+5. Downloads train_unsloth.py + patch_vlm_packing.py from GitHub
+6. Applies VLM packing unblock patch
+7. Pre-downloads Qwen3.5-9B tokenizer/config
 
 ### CRITICAL: Match CUDA toolkit to PyTorch's compiled CUDA version
 - `causal-conv1d` (required for GDN acceleration) compiles CUDA kernels at install time
@@ -307,7 +280,9 @@ def main():
 | Script | Purpose |
 |--------|---------|
 | `v1.2/scripts/train_unsloth.py` | SFT training with Unsloth FastVisionModel + packing at 32K |
+| `v1.2/scripts/pretokenize_for_sft.py` | Pre-tokenize training data to parquet shards (run on Romulus) |
 | `v1.2/scripts/patch_vlm_packing.py` | Removes VLM packing block from unsloth/trainer.py |
+| `v1.2/scripts/provision.sh` | Vast.ai bootstrap: installs all deps in ~4 min |
 | `v1.2/scripts/pretokenize.py` | Tokenize v1.2 data (8192 context) |
 | `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
 | `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
@@ -399,3 +374,30 @@ python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
 - LLaMA-Factory supports Qwen3.5 fine-tuning (official blog post)
 - But no evidence of 32K text-only training with packing at scale
 - Unsloth remains the better option for our use case
+
+### Dry Run Results (2026-04-02, validated)
+20-step dry run on fresh H100 SXM 80GB (no volume, 80GB local disk):
+- **Bootstrap**: provision.sh installs everything from scratch in ~4 min
+- **Data loading**: 261,998 rows from 6 parquet shards, ~5s
+- **Packing**: 262K rows -> 42,976 packed 32K sequences
+- **Step time**: ~59s/step steady state (first step 166s due to JIT)
+- **VRAM**: 60-63 GB / 80 GB (plenty of headroom)
+- **Loss**: 1.101 (step 10) -> 0.522 (step 20), avg 0.811
+- **Grad norm**: ~0.10 (healthy, no NaN)
+- **Trainable params**: 173M / 9.6B (1.81%)
+- **LoRA**: r=64, alpha=32, all GDN + attention + MLP targets
+
+### Training Cost Analysis (262K dataset)
+Full training (1 epoch) on 1x H100 SXM:
+- 42,976 packed examples, batch_size=1, grad_accum=4 -> 10,744 optimizer steps
+- ~59s/step -> **~176 hours (~7.3 days)** -> **~$378 at $2.15/hr**
+- Changing grad_accum does NOT reduce wall time — same number of forward/backward passes
+- batch_size must stay at 1 (GDN + packing limitation)
+- Multi-GPU untested with Unsloth + VLM packing patch
+
+**Cost reduction options:**
+1. **Reduce dataset to ~100K rows** (RECOMMENDED): ~67 hrs, ~$144
+2. **Multi-GPU**: Linear speedup but untested with our patches
+3. **16K context**: ~2x faster but truncates reasoning traces
+4. **QLoRA (4-bit)**: ~2x faster forward pass but quality tradeoff
+5. **Lower LoRA rank** (r=32): Maybe 10-20% faster
