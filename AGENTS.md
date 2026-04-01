@@ -136,7 +136,8 @@ Without `flash-linear-attention` + `causal-conv1d`, Qwen3.5's GDN layers (24/32)
 slow torch CPU implementation → 0% GPU utilization, training takes days instead of hours.
 - `flash-linear-attention`: pure Python wheel, installs instantly
 - `causal-conv1d`: requires CUDA compilation (~20-45 min depending on CPU)
-- Install with: `uv pip install causal-conv1d flash-linear-attention --no-build-isolation`
+- Install with: `TORCH_CUDA_ARCH_LIST="9.0" uv pip install causal-conv1d flash-linear-attention --no-build-isolation`
+- MUST set `TORCH_CUDA_ARCH_LIST="9.0"` — only compile for H100 (Hopper). Without this it builds for all GPU architectures and takes forever.
 - MUST use `--no-build-isolation` to avoid pip pulling wrong PyTorch/CUDA version
 - Use `uv` instead of `pip` — much faster installs
 

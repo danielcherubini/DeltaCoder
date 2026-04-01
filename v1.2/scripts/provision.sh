@@ -35,7 +35,9 @@ uv pip install unsloth 2>&1 | tee -a "$LOG"
 echo "Installing flash-linear-attention..." | tee -a "$LOG"
 uv pip install flash-linear-attention 2>&1 | tee -a "$LOG"
 
-echo "Installing causal-conv1d (CUDA compilation, may take 20-45 min)..." | tee -a "$LOG"
+echo "Installing causal-conv1d (CUDA compilation for SM 9.0 / H100 only)..." | tee -a "$LOG"
+export TORCH_CUDA_ARCH_LIST="9.0"
+export PATH="/usr/local/cuda/bin:$PATH"
 uv pip install causal-conv1d --no-build-isolation 2>&1 | tee -a "$LOG"
 
 # ---------- VLM Packing Patch ----------
