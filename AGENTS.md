@@ -1,11 +1,12 @@
-# AGENTS.md — DeltaCoder v1.2 (v1.3 planned)
+# AGENTS.md — DeltaCoder v1.2
 
 ## 1. Project Overview
 
 **DeltaCoder** is a code-specialized LLM trained on Qwen3.5-9B with:
-- **v1.2**: SFT + DPO at 8192 context (truncated OCR traces)
-- **v1.3**: SFT + DPO at 32768 context (full OCR reasoning traces)
-- Target: GitHub + OCR code traces for complex reasoning
+- **v1.2**: SFT + DPO at 32768 context (full reasoning traces)
+- Priorities (in order): (1) Coding, (2) Tool Calling, (3) Agentic Workflows
+- Target: THE BEST 9B for those three tasks
+- **MUST preserve vision capabilities** — Qwen3.5-9B is a VLM
 
 ## 2. Repository Structure
 
@@ -32,13 +33,90 @@ DeltaCoder/
 └── README.md
 ```
 
-## 3. Vast.ai Instance
+## 3. Vast.ai Infrastructure
 
+### Current Instance
 **Connect**: `ssh -T -o StrictHostKeyChecking=no -p <PORT> root@<VAST_IP>`
-**Template**: PyTorch Development Environment (CUDA 12.8)
-**Venv**: `/venv/main/` (auto-activated on SSH)
+**Image**: `nvcr.io/nvidia/pytorch:26.01-py3` (PyTorch NGC)
+**Volume**: 300GB persistent volume mounted at `/workspace/`
 
-**Find new instances**: `vastai search offers 'gpu_name=H200 num_gpus=1 dph<2.0'`
+### Instance Creation (with persistent volume)
+```bash
+# Search for H100 SXM offers (US/EU only for latency, skip host 68137 — broken SSH)
+vastai search offers 'gpu_name=H100_SXM num_gpus=1 dph<2.5 reliability>0.95 geolocation in [US,DE,NL,GB,CZ]' --order 'dph' --raw
+
+# Create instance WITH persistent volume (volume survives instance destruction)
+vastai create instance <OFFER_ID> \
+  --image nvcr.io/nvidia/pytorch:26.01-py3 \
+  --env '-e DATA_DIRECTORY="/workspace/" -e JUPYTER_DIR="/"' \
+  --onstart-cmd 'env >> /etc/environment;mkdir -p ${DATA_DIRECTORY:-/workspace};' \
+  --disk 16 \
+  --create-volume <VOLUME_ASK_ID> --volume-size 300 --mount-path '/workspace' \
+  --ssh --direct
+
+# Copy files to/from instances (better than scp)
+vastai copy local:path/to/file C.<INSTANCE_ID>:/workspace/
+vastai copy C.<INSTANCE_ID>:/workspace/output local:output/
+```
+
+### Volume Strategy
+Persistent volume at `/workspace/` holds all data, scripts, models, and checkpoints.
+Survives instance destruction — can swap templates without re-uploading.
+
+**Current volume**: ID 33974210, 300GB, host 260094 (US), $0.20/GB/mo
+
+**Swapping templates on the same volume:**
+```bash
+# Destroy instance (volume persists)
+vastai destroy instance <INSTANCE_ID>
+
+# Recreate on same host with different image, reattach volume
+# NOTE: --link-volume may fail with "access denied" if the offer ID doesn't match
+# the volume's host. Use an offer on the SAME host (check host_id in offer search).
+# Also: the first offer ID tried (33748664) failed with access denied even on the
+# same host. The second offer (32856289) on the same host worked. May be a timing/
+# caching issue — try a different offer on the same host if one fails.
+vastai create instance <OFFER_ID> \
+  --image <NEW_IMAGE> \
+  --link-volume <VOLUME_ID> \
+  --mount-path '/workspace' \
+  --ssh --direct
+```
+
+**Volume contents:**
+```
+/workspace/
+├── venv/                    # Python venv (persists across restarts)
+├── v1.2_sft_train.jsonl     # 262K training rows (5.1GB)
+├── train_unsloth.py         # SFT training script
+├── patch_vlm_packing.py     # VLM packing unblock patch
+├── outputs/                 # LoRA adapters + checkpoints
+├── merged_v1.2/             # Merged SFT model (~18GB)
+└── logs/                    # Training logs
+```
+
+### Versioned Templates (for future phases)
+Vast.ai has version-tagged Docker images with precise CUDA/PyTorch/Python combinations:
+- **vastai/pytorch**: Tags like `2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26` (PyTorch 2.10, CUDA toolkit 12.9, Python 3.12). Use this for training — CUDA toolkit matches PyTorch's compiled CUDA version, so `causal-conv1d` compiles without errors.
+- **nvcr.io/nvidia/pytorch:26.01-py3**: NGC PyTorch — AVOID for compiling CUDA extensions. Ships CUDA toolkit 13.1 but PyTorch compiled for CUDA 12.8 → `causal-conv1d` fails with version mismatch.
+- **vastai/vllm:nightly-2026-03-02-cuda-12.9**: vLLM nightly (for DPO pair generation)
+- **vastai/base-image:cuda-13.2.0-auto**: CUDA 13.2, clean base
+- **unsloth/unsloth:latest**: Unsloth Studio (NOTE: SSH may not work with Vast.ai — uses non-standard port mappings)
+
+### Environment Variables (vastai/pytorch image)
+- `WORKSPACE`: Change default working directory
+- `PROVISIONING_SCRIPT`: Auto-run setup script from URL on instance boot (GitHub, Gist, any plain-text URL)
+- `TENSORBOARD_LOG_DIR`: Customize Tensorboard log dir (defaults to /workspace)
+- `ENABLE_HTTPS`: Force HTTPS connections
+
+The `PROVISIONING_SCRIPT` is powerful — point it at a gist that installs unsloth + deps
+and the instance is ready to train on boot. No manual SSH setup needed.
+
+### CRITICAL: Match CUDA toolkit to PyTorch's compiled CUDA version
+- `causal-conv1d` (required for GDN acceleration) compiles CUDA kernels at install time
+- If the system CUDA toolkit version doesn't match PyTorch's compiled CUDA version, build fails
+- NGC PyTorch `26.01-py3` has toolkit 13.1 but torch compiled for 12.8 → FAILS
+- `vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26` has toolkit 12.9 + torch for 12.8 → WORKS (close enough)
 
 ### CRITICAL: flash-linear-attention is REQUIRED for training
 
@@ -46,20 +124,21 @@ Without `flash-linear-attention` + `causal-conv1d`, Qwen3.5's GDN layers (24/32)
 slow torch CPU implementation → 0% GPU utilization, training takes days instead of hours.
 - `flash-linear-attention`: pure Python wheel, installs instantly
 - `causal-conv1d`: requires CUDA compilation (~20-45 min depending on CPU)
-- Install with: `pip install causal-conv1d flash-linear-attention --no-build-isolation`
+- Install with: `uv pip install causal-conv1d flash-linear-attention --no-build-isolation`
 - MUST use `--no-build-isolation` to avoid pip pulling wrong PyTorch/CUDA version
+- Use `uv` instead of `pip` — much faster installs
 
-**Monitoring commands**:
+### Monitoring commands
 ```bash
 # GPU health
 nvidia-smi -q -d MEMORY,TEMPERATURE,FAN
 
 # Training process
-ps aux | grep accelerate
-tail -f logs/*.log
+ps aux | grep python
+tail -f /workspace/logs/*.log
 
 # Disk usage
-df -h
+df -h /workspace
 ```
 
 ## 4. CRITICAL RULES — DO NOT VIOLATE
@@ -68,6 +147,30 @@ df -h
 - **Unsloth DPOTrainer** — crashes with `KeyError: 'images'` on Qwen3.5 VLM
 - **flash_attention_2** with Qwen3.5 GDN — causes `cudaErrorIllegalAddress`
 - **vLLM stable releases** for Qwen3.5-9B — stable versions (0.11.0, 0.18.1) fail weight loading. **Must use vLLM nightly** (`uv pip install --pre -U vllm --extra-index-url https://wheels.vllm.ai/nightly`)
+
+### SFT Training Approach: Unsloth FastVisionModel + Packing Unblock
+
+Qwen3.5-9B is a unified VLM — there is NO separate text-only model. Every variant uses
+`Qwen3_5ForConditionalGeneration`. This creates issues for text-only fine-tuning with packing:
+
+1. **Unsloth blocks sample packing for VLMs** — checks `ForConditionalGeneration` in architectures
+   and `vision_config` in model config, plus `ProcessorMixin` check on tokenizer
+2. **Without packing**: ~182 hours for 262K rows ($333) — too slow
+3. **With packing**: ~38 hours ($69) — feasible
+
+**Solution** (validated by community in unslothai/unsloth#4160):
+- Load with `FastVisionModel` (preserves all vision weights)
+- LoRA with `finetune_vision_layers=False` (only train language layers)
+- Apply VLM packing unblock patch (`patch_vlm_packing.py`) to remove `is_vlm` check from `trainer.py`
+- Pass `tokenizer` (not processor) to `SFTTrainer` to bypass `ProcessorMixin` check
+- Use `packing=True`, `max_seq_length=32768`, `per_device_train_batch_size=1`
+
+**NaN gradient risk**: Issue #4160 reports NaN gradients at >16K context, but this appears to be
+a total-tokens-per-batch issue (~64K threshold). At batch_size=1 + 32K, total is ~32K — safely below.
+
+**32K OOM background**: The VL model materializes full logits tensor (32K × 248K vocab ≈ 30GB)
+before computing cross_entropy. Unsloth handles this internally with fused CE — no OOM.
+Axolotl's Liger integration only patches `ForCausalLM`, not `ForConditionalGeneration`.
 
 ### Use vLLM nightly for inference (DPO pair generation):
 
@@ -190,6 +293,8 @@ def main():
 
 | Script | Purpose |
 |--------|---------|
+| `v1.2/scripts/train_unsloth.py` | SFT training with Unsloth FastVisionModel + packing at 32K |
+| `v1.2/scripts/patch_vlm_packing.py` | Removes VLM packing block from unsloth/trainer.py |
 | `v1.2/scripts/pretokenize.py` | Tokenize v1.2 data (8192 context) |
 | `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
 | `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
@@ -243,3 +348,41 @@ python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
     --llama-cpp-dir /workspace/llama.cpp \
     --keep-merged --upload --hf-token $HF_TOKEN
 ```
+
+## 11. Key Discoveries & Constraints
+
+### 32K context cross_entropy OOM (Axolotl path — NOT used)
+- The VL model (`Qwen3_5ForConditionalGeneration`) materializes full logits tensor
+  (32K × 248K vocab ≈ 30GB) before computing cross_entropy loss
+- Axolotl's Liger integration only patches `ForCausalLM`, not `ForConditionalGeneration`
+- Axolotl PR #2908 added generic fused CE for arbitrary models, but still targets `ForCausalLM`
+- **Solution**: Use Unsloth instead (handles fused CE internally)
+
+### Unsloth VLM packing block
+- Unsloth deliberately blocks sample packing for VLMs (issue #4120 — open feature request)
+- Two checks: `is_vlm` (architectures + vision_config) and `isinstance(ProcessorMixin)`
+- **Bypass**: `patch_vlm_packing.py` removes `is_vlm` check; passing tokenizer (not processor)
+  to SFTTrainer bypasses the ProcessorMixin check
+
+### NaN gradients at high total tokens per batch (issue #4160)
+- At batch_size=4 + 17K context (~68K total tokens), gradients go NaN
+- At batch_size=4 + 16K context (~64K total tokens), high grads but recovers
+- At batch_size=1 + 32K context (~32K total tokens), safely below threshold
+- **Mitigation**: Use batch_size=1 with packing
+
+### Vast.ai volume limitations
+- Regular volumes (`search volumes`) only attach to instances on the SAME physical machine
+- No H100 SXM hosts currently offer regular volume storage
+- **Solution**: Use `--create-volume` flag on `create instance` which creates a network volume
+  that persists independently and can be reattached
+
+### Unsloth Docker image SSH issues
+- `unsloth/unsloth:latest` Docker image has its own port mappings that conflict with Vast.ai SSH
+- The official Unsloth template exposes ports 1111, 6006, 8080, 8384, 8888, 72299 — NOT port 22
+- SSH is handled by Vast.ai's proxy, not the container
+- **Workaround**: Use PyTorch NGC image + `pip install unsloth` instead
+
+### LLaMA-Factory Qwen3.5 support
+- LLaMA-Factory supports Qwen3.5 fine-tuning (official blog post)
+- But no evidence of 32K text-only training with packing at scale
+- Unsloth remains the better option for our use case

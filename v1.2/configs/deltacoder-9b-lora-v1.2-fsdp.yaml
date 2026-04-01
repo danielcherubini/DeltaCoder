@@ -1,0 +1,111 @@
+# Qwen3.5-DeltaCoder-9B v1.2 — LoRA SFT config with FSDP2 for 2x H100
+# Target: Vast.ai 2x H100 SXM 80GB (160GB total VRAM)
+#
+# Pre-tokenize first (32K context):
+#   python scripts/pretokenize.py data/v1.2_sft_train.jsonl /dev/shm/train_tokenized.jsonl 1
+#
+# Run (2x GPU):
+#   accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora-v1.2-fsdp.yaml
+#
+# Test run:
+#   accelerate launch -m axolotl.cli.train configs/deltacoder-9b-lora-v1.2-fsdp.yaml \
+#     --max_steps=20 --val_set_size=0.01
+
+base_model: Qwen/Qwen3.5-9B
+trust_remote_code: true
+strict: false
+
+# ---------- Dataset ----------
+# Pre-tokenized: input_ids/attention_mask/labels already computed by pretokenize.py
+datasets:
+  - path: /dev/shm/train_tokenized.jsonl
+    ds_type: json
+    type:
+
+val_set_size: 0.02
+dataset_prepared_path: last_run_prepared
+output_dir: ./outputs/deltacoder-9b-v1.2
+
+# ---------- Sequence / Packing ----------
+sequence_len: 32768
+sample_packing: true
+pad_to_sequence_len: true
+
+# ---------- LoRA ----------
+adapter: lora
+lora_r: 64
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  # Full Attention (8 of 32 layers)
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  # GDN / Gated Delta Net (24 of 32 layers)
+  - in_proj_qkv
+  - in_proj_z
+  - in_proj_b
+  - in_proj_a
+  - out_proj
+  # MLP (all 32 layers)
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# CRITICAL: disable LoRA kernel optimizations for Qwen3.5
+lora_mlp_kernel: false
+lora_qkv_kernel: false
+lora_o_kernel: false
+
+# ---------- FSDP2 (multi-GPU) ----------
+fsdp_version: 2
+fsdp_config:
+  offload_params: false
+  cpu_ram_efficient_loading: true
+  auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
+  state_dict_type: FULL_STATE_DICT
+  reshard_after_forward: true
+
+# ---------- Training ----------
+num_epochs: 1
+micro_batch_size: 1
+gradient_accumulation_steps: 8
+optimizer: adamw_torch
+lr_scheduler: cosine
+learning_rate: 1e-4
+warmup_ratio: 0.05
+weight_decay: 0.01
+
+# ---------- Precision / Memory ----------
+bf16: auto
+tf32: true
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+# SDPA — flash_attention_2 causes CUDA errors with Qwen3.5 GDN layers
+attn_implementation: sdpa
+
+# ---------- Liger Kernel ----------
+# fused_linear_cross_entropy patches ForCausalLM to avoid materializing logits
+# We also need a VL wrapper patch (see patch_vl_lce.py) since the model loads
+# as Qwen3_5ForConditionalGeneration
+liger_fused_linear_cross_entropy: true
+liger_rms_norm: true
+liger_glu_activation: true
+
+# ---------- Optimization ----------
+# GDN doesn't support batch>1 with packing — group_by_length reduces padding waste
+group_by_length: true
+
+# ---------- Logging / Saving ----------
+logging_steps: 10
+evals_per_epoch: 4
+saves_per_epoch: 2
+save_total_limit: 3
+
+# ---------- DO NOT USE ----------
+# fix_untrained_tokens: true   # broken with Qwen3.5 (axolotl #2660)
+# flash_attention: true        # use attn_implementation: sdpa instead
