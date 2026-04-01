@@ -112,6 +112,18 @@ Vast.ai has version-tagged Docker images with precise CUDA/PyTorch/Python combin
 The `PROVISIONING_SCRIPT` is powerful — point it at a gist that installs unsloth + deps
 and the instance is ready to train on boot. No manual SSH setup needed.
 
+**Provisioning script**: `v1.2/scripts/provision.sh` — installs unsloth, causal-conv1d,
+flash-linear-attention into `/workspace/venv/`, applies VLM packing patch. Use with:
+```bash
+vastai create instance <OFFER_ID> \
+  --image vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26 \
+  --env '-e PROVISIONING_SCRIPT="https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/provision.sh" -e DATA_DIRECTORY="/workspace/"' \
+  --disk 16 \
+  --link-volume <VOLUME_ID> \
+  --mount-path '/workspace' \
+  --ssh --direct
+```
+
 ### CRITICAL: Match CUDA toolkit to PyTorch's compiled CUDA version
 - `causal-conv1d` (required for GDN acceleration) compiles CUDA kernels at install time
 - If the system CUDA toolkit version doesn't match PyTorch's compiled CUDA version, build fails
