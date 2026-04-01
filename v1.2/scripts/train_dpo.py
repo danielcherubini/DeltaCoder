@@ -138,8 +138,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(
             args.sft_model,
             torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa",
-            device_map="auto",
+            attn_implementation="eager",
             trust_remote_code=True,
         )
         tokenizer = AutoTokenizer.from_pretrained(
@@ -150,8 +149,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(
             BASE_MODEL_NAME,
             torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa",
-            device_map="auto",
+            attn_implementation="eager",
             trust_remote_code=True,
         )
         model = PeftModel.from_pretrained(model, args.sft_adapter)
@@ -181,7 +179,6 @@ def main():
         task_type="CAUSAL_LM",
     )
     model.enable_input_require_grads()  # Required for gradient checkpointing + LoRA
-    model.gradient_checkpointing_enable()
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
@@ -203,8 +200,8 @@ def main():
         max_length=MAX_SEQ_LENGTH,  # Max total (prompt + response) length
         truncation_mode="keep_start",  # Truncate from end if too long
         dataset_num_proc=1,  # Qwen3.5 tokenizer crashes with multiprocessing
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,  # Effective batch size = 16
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=16,  # Effective batch size = 16
         num_train_epochs=1,
         learning_rate=5e-6,  # ~20x lower than SFT — DPO is LR-sensitive
         lr_scheduler_type="cosine",

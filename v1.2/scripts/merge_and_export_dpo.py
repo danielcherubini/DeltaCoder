@@ -2,10 +2,10 @@
 DeltaCoder — Merge LoRA adapters + export to GGUF.
 
 Two-stage merge:
-  1. Qwen/Qwen3.5-9B + SFT LoRA → merged SFT (or use pre-merged SFT model)
-  2. merged SFT + DPO LoRA → merged DPO (full bf16 weights)
-  3. Convert → GGUF (f16)
-  4. Quantize f16 → all quants
+  1. Qwen/Qwen3.5-9B + SFT LoRA -> merged SFT (or use pre-merged SFT model)
+  2. merged SFT + DPO LoRA -> merged DPO (full bf16 weights)
+  3. Convert -> GGUF (f16)
+  4. Quantize f16 -> all quants
   5. Upload to HuggingFace (optional)
 
 Usage:
@@ -244,7 +244,7 @@ def main():
     print("DPO LoRA merged.")
 
     # ---------- Step 4: Save merged model ----------
-    print(f"\n=== Step 4: Saving merged model → {merged_dir} ===")
+    print(f"\n=== Step 4: Saving merged model -> {merged_dir} ===")
     model.save_pretrained(merged_dir)
     tokenizer.save_pretrained(merged_dir)
     print(f"Merged model saved to: {merged_dir}")
@@ -268,7 +268,7 @@ def main():
 
     # ---------- Step 7: Convert to GGUF (f16) ----------
     f16_gguf = f"{gguf_dir}/{filename_prefix}-f16.gguf"
-    print(f"\n=== Step 7: Converting to GGUF (f16) → {f16_gguf} ===")
+    print(f"\n=== Step 7: Converting to GGUF (f16) -> {f16_gguf} ===")
     run(
         f"python {args.llama_cpp_dir}/convert_hf_to_gguf.py {merged_dir} "
         f"--outfile {f16_gguf} --outtype f16"
@@ -299,7 +299,7 @@ def main():
     for quant in QUANTS:
         out = f"{gguf_dir}/{filename_prefix}-{quant}.gguf"
         if quant == "BF16":
-            # Use llama-quantize to convert f16 → bf16 (not just a copy)
+            # Use llama-quantize to convert f16 -> bf16 (not just a copy)
             print(f"  Converting to BF16...")
             run(f"{quantize_bin} {f16_gguf} {out} BF16")
         else:
