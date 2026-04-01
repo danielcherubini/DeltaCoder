@@ -36,32 +36,46 @@ def load_tokenizer(model_id):
 def normalize_messages(messages):
     """
     Normalize messages for apply_chat_template compatibility.
-    - Flatten tool_calls into content string (xlam format)
+    - Preserve tool_calls on assistant messages (let apply_chat_template handle formatting)
+    - Preserve tool_call_id/name on tool messages
     - Ensure content is always a string
-    - Keep only role + content keys
     """
     normalized = []
     for m in messages:
         role = m["role"]
         content = m.get("content", "") or ""
 
-        # If assistant message has tool_calls, format them into content
-        if "tool_calls" in m and m["tool_calls"]:
-            calls = []
-            for tc in m["tool_calls"]:
-                func = tc.get("function", {})
-                name = func.get("name", "")
-                args = func.get("arguments", "{}")
-                calls.append(
-                    f'<functioncall> {{"name": "{name}", "arguments": {args}}}'
-                )
-            content = "\n".join(calls)
-
         # Ensure content is a string
         if not isinstance(content, str):
             content = str(content)
 
-        normalized.append({"role": role, "content": content})
+        msg = {"role": role, "content": content}
+
+        # Pass through tool_calls — apply_chat_template formats them natively
+        # Parse arguments from JSON string to dict if needed (Jinja template expects dict)
+        if "tool_calls" in m and m["tool_calls"]:
+            fixed_calls = []
+            for tc in m["tool_calls"]:
+                tc = dict(tc)  # shallow copy
+                if "function" in tc:
+                    func = dict(tc["function"])
+                    args = func.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            func["arguments"] = json.loads(args)
+                        except (json.JSONDecodeError, TypeError):
+                            func["arguments"] = {"raw": args}
+                    tc["function"] = func
+                fixed_calls.append(tc)
+            msg["tool_calls"] = fixed_calls
+
+        # Pass through tool response metadata
+        if "tool_call_id" in m:
+            msg["tool_call_id"] = m["tool_call_id"]
+        if "name" in m and role == "tool":
+            msg["name"] = m["name"]
+
+        normalized.append(msg)
     return normalized
 
 
@@ -106,15 +120,26 @@ def find_assistant_spans(input_ids, im_start_id, im_end_id, assistant_nl_ids):
 
 
 def tokenize_conversation(
-    messages, tokenizer, sequence_len, im_start_id, im_end_id, assistant_nl_ids
+    messages,
+    tokenizer,
+    sequence_len,
+    im_start_id,
+    im_end_id,
+    assistant_nl_ids,
+    tools=None,
 ):
     """Tokenize a single conversation with proper assistant masking."""
     # Single call to apply_chat_template — O(1) per conversation
-    out = tokenizer.apply_chat_template(
-        messages,
+    kwargs = dict(
         tokenize=True,
         return_dict=True,
         add_generation_prompt=False,
+    )
+    if tools:
+        kwargs["tools"] = tools
+    out = tokenizer.apply_chat_template(
+        messages,
+        **kwargs,
     )
     input_ids = list(out["input_ids"])
 
@@ -148,6 +173,7 @@ def process_chunk(chunk, model_id, sequence_len):
     results = []
     for row in chunk:
         messages = normalize_messages(row["messages"])
+        tools = row.get("tools", None)
         try:
             input_ids, attention_mask, labels = tokenize_conversation(
                 messages,
@@ -156,6 +182,7 @@ def process_chunk(chunk, model_id, sequence_len):
                 im_start_id,
                 im_end_id,
                 assistant_nl_ids,
+                tools=tools,
             )
             # Skip empty sequences
             if len(input_ids) < 10:
@@ -178,15 +205,46 @@ def process_chunk(chunk, model_id, sequence_len):
 
 
 def main():
-    input_path = sys.argv[1] if len(sys.argv) > 1 else "data/train.jsonl"
-    output_path = sys.argv[2] if len(sys.argv) > 2 else "data/train_tokenized.jsonl"
-    num_workers = int(sys.argv[3]) if len(sys.argv) > 3 else min(mp.cpu_count(), 32)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Pre-tokenize DeltaCoder training data"
+    )
+    parser.add_argument(
+        "input_path", nargs="?", default="data/train.jsonl", help="Input JSONL file"
+    )
+    parser.add_argument(
+        "output_path",
+        nargs="?",
+        default="data/train_tokenized.jsonl",
+        help="Output JSONL file",
+    )
+    parser.add_argument(
+        "num_workers",
+        nargs="?",
+        type=int,
+        default=min(mp.cpu_count(), 32),
+        help="Number of worker processes",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only process first N rows (for testing)",
+    )
+    args = parser.parse_args()
+
+    input_path = args.input_path
+    output_path = args.output_path
+    num_workers = args.num_workers
 
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
     print(f"Workers: {num_workers}")
     print(f"Sequence length: {SEQUENCE_LEN}")
     print(f"Model: {MODEL_ID}")
+    if args.limit:
+        print(f"Limit: {args.limit} rows")
 
     # Load all rows into memory
     print("Loading dataset...", flush=True)
@@ -194,6 +252,8 @@ def main():
     with open(input_path, "r", encoding="utf-8") as f:
         for line in f:
             rows.append(json.loads(line))
+            if args.limit and len(rows) >= args.limit:
+                break
     print(f"Loaded {len(rows)} rows", flush=True)
 
     # Test with first row
@@ -207,19 +267,29 @@ def main():
 
     # Test a few rows to verify masking works
     for test_idx in range(min(5, len(rows))):
+        test_messages = normalize_messages(rows[test_idx]["messages"])
+        test_tools = rows[test_idx].get("tools", None)
         test_ids, test_mask, test_labels = tokenize_conversation(
-            rows[test_idx]["messages"],
+            test_messages,
             tokenizer,
             SEQUENCE_LEN,
             im_start_id,
             im_end_id,
             assistant_nl_ids,
+            tools=test_tools,
         )
         n_masked = sum(1 for l in test_labels if l == -100)
         n_total = len(test_labels)
         n_trainable = n_total - n_masked
+        has_tools = "tools" in rows[test_idx]
+        has_tool_calls = any("tool_calls" in m for m in rows[test_idx]["messages"])
+        tag = ""
+        if has_tools:
+            tag += " [tools]"
+        if has_tool_calls:
+            tag += " [tool_calls]"
         print(
-            f"Row {test_idx}: {n_total} tokens, {n_trainable} assistant ({n_trainable / max(n_total, 1) * 100:.1f}%), {n_masked} masked"
+            f"Row {test_idx}: {n_total} tokens, {n_trainable} assistant ({n_trainable / max(n_total, 1) * 100:.1f}%), {n_masked} masked{tag}"
         )
         if n_trainable > 0:
             break

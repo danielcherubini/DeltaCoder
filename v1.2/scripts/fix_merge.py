@@ -35,6 +35,12 @@ def parse_args():
     parser.add_argument("--dpo-adapter", type=str, required=True)
     parser.add_argument("--output-dir", type=str, required=True)
     parser.add_argument(
+        "--chat-template",
+        type=str,
+        default=None,
+        help="Path to custom chat_template.jinja to copy into output",
+    )
+    parser.add_argument(
         "--skip-verify", action="store_true", help="Skip weight difference verification"
     )
     return parser.parse_args()
@@ -187,6 +193,24 @@ def main():
     print(f"\n=== Saving merged model -> {args.output_dir} ===")
     model.save_pretrained(args.output_dir, max_shard_size="99GB")
     tokenizer.save_pretrained(args.output_dir)
+
+    # Override chat template if provided
+    if args.chat_template:
+        dst = os.path.join(args.output_dir, "chat_template.jinja")
+        shutil.copy2(args.chat_template, dst)
+        print(f"  Copied custom chat_template.jinja")
+
+        # Also update tokenizer_config.json to embed the template
+        tok_config_path = os.path.join(args.output_dir, "tokenizer_config.json")
+        if os.path.exists(tok_config_path):
+            with open(args.chat_template, "r", encoding="utf-8") as tf:
+                template_str = tf.read()
+            with open(tok_config_path, "r", encoding="utf-8") as f:
+                tok_config = json.load(f)
+            tok_config["chat_template"] = template_str
+            with open(tok_config_path, "w", encoding="utf-8") as f:
+                json.dump(tok_config, f, indent=2, ensure_ascii=False)
+            print(f"  Updated tokenizer_config.json with new chat_template")
 
     # Check what we saved
     config_path = os.path.join(args.output_dir, "config.json")
