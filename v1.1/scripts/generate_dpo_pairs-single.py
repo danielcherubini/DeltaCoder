@@ -141,7 +141,7 @@ def main():
     )
     parser.add_argument("--n-samples", type=int, default=8, help="Samples per problem")
     parser.add_argument(
-        "--api-base", type=str, default="http://romulus:11434/v1", help="API base URL"
+        "--api-base", type=str, default="http://localhost:11434/v1", help="API base URL"
     )
     parser.add_argument("--model", type=str, default="deltacoder", help="Model name")
     parser.add_argument(

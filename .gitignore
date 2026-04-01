@@ -11,8 +11,11 @@ v1.1/logs/
 
 # v1.2 large artifacts (adapter weights, merged model, training data)
 v1.2/lora_adapter/
+v1.2/dpo_adapter/
+v1.2/dpo_checkpoints/
 v1.2/merged/
 v1.2/data/
+v1.2/logs/
 v1.2/*.log
 
 # v1.3 large artifacts

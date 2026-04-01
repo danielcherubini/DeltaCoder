@@ -34,7 +34,7 @@ DeltaCoder/
 
 ## 3. Vast.ai Instance
 
-**Connect**: `ssh -T -o StrictHostKeyChecking=no -p 20488 root@213.5.130.43`
+**Connect**: `ssh -T -o StrictHostKeyChecking=no -p <PORT> root@<VAST_IP>`
 **Template**: PyTorch Development Environment (CUDA 12.8)
 **Venv**: `/venv/main/` (auto-activated on SSH)
 
