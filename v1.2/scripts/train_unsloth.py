@@ -8,9 +8,16 @@ Applies VLM packing unblock (from unslothai/unsloth#4160) to enable
 sample packing at 32K context. The NaN gradient issue only affects
 total tokens per batch >~64K; at batch_size=1 + 32K we're safe.
 
+Supports two data input modes:
+  1. Raw JSONL (--data /path/to/v1.2_sft_train.jsonl) — tokenizes on-the-fly
+  2. Pre-tokenized parquet dir (--data /path/to/v1.2_pretokenized/) — skips tokenization
+
+Pre-tokenized mode is ~100x faster to start since 262K rows are already tokenized.
+
 Usage:
-    python train_unsloth.py --data /path/to/v1.2_sft_train.jsonl
-    python train_unsloth.py --data /path/to/v1.2_sft_train.jsonl --max-steps 20  # dry run
+    python train_unsloth.py --data /workspace/v1.2_pretokenized
+    python train_unsloth.py --data /workspace/v1.2_pretokenized --max-steps 20  # dry run
+    python train_unsloth.py --data /workspace/v1.2_sft_train.jsonl  # raw JSONL fallback
 """
 
 import argparse
@@ -77,7 +84,11 @@ LORA_TARGET_MODULES = [
 
 def parse_args():
     parser = argparse.ArgumentParser(description="DeltaCoder v1.2 SFT with Unsloth")
-    parser.add_argument("--data", required=True, help="Path to training JSONL")
+    parser.add_argument(
+        "--data",
+        required=True,
+        help="Path to training JSONL or pre-tokenized parquet directory",
+    )
     parser.add_argument("--output-dir", default=OUTPUT_DIR, help="Output directory")
     parser.add_argument(
         "--max-steps", type=int, default=-1, help="Max steps (-1 = full epoch)"
@@ -211,7 +222,6 @@ def main():
         max_seq_length=args.max_seq_length,
     )
 
-    # Load and convert dataset
     # NOTE: FastVisionModel returns a processor (ProcessorMixin), not a plain tokenizer.
     # For text-only training, we need to extract the tokenizer from the processor
     # and use it directly with SFTTrainer (otherwise ProcessorMixin blocks packing).
@@ -225,41 +235,81 @@ def main():
     else:
         actual_tokenizer = tokenizer
 
-    rows = load_dataset_from_jsonl(args.data)
-    dataset = build_text_dataset(rows, actual_tokenizer)
-    del rows  # free memory
+    # Load dataset — two modes:
+    # 1. Pre-tokenized parquet dir (fast): has input_ids/attention_mask/labels columns
+    # 2. Raw JSONL (slow): needs chat template + tokenization
+    is_pretokenized = os.path.isdir(args.data) and any(
+        f.endswith(".parquet") for f in os.listdir(args.data)
+    )
+
+    if is_pretokenized:
+        print(f"\nLoading pre-tokenized dataset from {args.data}...")
+        dataset = Dataset.from_parquet(
+            sorted(
+                os.path.join(args.data, f)
+                for f in os.listdir(args.data)
+                if f.endswith(".parquet")
+            )
+        )
+        print(f"  Loaded {len(dataset):,} rows, columns: {dataset.column_names}")
+        total_tokens = sum(len(ids) for ids in dataset["input_ids"])
+        print(f"  Total tokens: {total_tokens:,}")
+        print(f"  Avg sequence length: {total_tokens / len(dataset):.0f}")
+        use_text_field = False
+    else:
+        print(f"\nLoading raw JSONL dataset from {args.data}...")
+        # Cache the tokenized dataset on disk so we don't re-tokenize 262K rows every run
+        cache_path = args.data + ".templated_cache"
+        if os.path.isdir(cache_path):
+            print(f"Loading cached dataset from {cache_path}...")
+            dataset = Dataset.load_from_disk(cache_path)
+            print(f"  Loaded {len(dataset):,} rows from cache")
+        else:
+            rows = load_dataset_from_jsonl(args.data)
+            dataset = build_text_dataset(rows, actual_tokenizer)
+            del rows  # free memory
+            print(f"Saving dataset cache to {cache_path}...")
+            dataset.save_to_disk(cache_path)
+            print(f"  Cached {len(dataset):,} rows")
+        use_text_field = True
 
     # Enable training mode
     FastVisionModel.for_training(model)
 
     # Configure trainer — pass actual_tokenizer (not processor) to avoid ProcessorMixin block
+    sft_config_kwargs = dict(
+        max_seq_length=args.max_seq_length,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        warmup_ratio=args.warmup_ratio,
+        num_train_epochs=1,
+        max_steps=args.max_steps if args.max_steps > 0 else -1,
+        learning_rate=args.lr,
+        lr_scheduler_type="cosine",
+        weight_decay=0.01,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
+        save_total_limit=3,
+        output_dir=args.output_dir,
+        optim="adamw_8bit",
+        bf16=True,
+        tf32=True,
+        seed=42,
+        dataset_num_proc=1,  # CRITICAL: Qwen3.5 tokenizer crashes with multiprocessing
+        packing=True,  # Enabled! Requires VLM packing unblock patch on trainer.py
+        report_to="none",
+    )
+
+    # Only set dataset_text_field for raw JSONL mode (text column)
+    # For pre-tokenized data, SFTTrainer detects input_ids/attention_mask/labels columns
+    if use_text_field:
+        sft_config_kwargs["dataset_text_field"] = "text"
+
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset,
         processing_class=actual_tokenizer,
-        args=SFTConfig(
-            dataset_text_field="text",
-            max_seq_length=args.max_seq_length,
-            per_device_train_batch_size=args.batch_size,
-            gradient_accumulation_steps=args.grad_accum,
-            warmup_ratio=args.warmup_ratio,
-            num_train_epochs=1,
-            max_steps=args.max_steps if args.max_steps > 0 else -1,
-            learning_rate=args.lr,
-            lr_scheduler_type="cosine",
-            weight_decay=0.01,
-            logging_steps=args.logging_steps,
-            save_steps=args.save_steps,
-            save_total_limit=3,
-            output_dir=args.output_dir,
-            optim="adamw_8bit",
-            bf16=True,
-            tf32=True,
-            seed=42,
-            dataset_num_proc=1,  # CRITICAL: Qwen3.5 tokenizer crashes with multiprocessing
-            packing=True,  # Enabled! Requires VLM packing unblock patch on trainer.py
-            report_to="none",
-        ),
+        args=SFTConfig(**sft_config_kwargs),
     )
 
     # Print trainable params

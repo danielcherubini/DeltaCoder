@@ -16,6 +16,10 @@ LOG="/workspace/provision.log"
 echo "=== DeltaCoder v1.2 Provisioning ===" | tee "$LOG"
 echo "Started: $(date)" | tee -a "$LOG"
 
+# ---------- HF cache on volume (not root disk!) ----------
+export HF_HOME="/workspace/.cache/huggingface"
+mkdir -p "$HF_HOME"
+
 # ---------- CUDA path ----------
 # Find the CUDA toolkit (vastai/pytorch images put it in /usr/local/cuda-XX.Y)
 export PATH="/usr/local/cuda/bin:$PATH"
@@ -119,15 +123,29 @@ PYEOF
 echo "  Installing from patched source..." | tee -a "$LOG"
 uv pip install "$CONV1D_DIR" --no-build-isolation 2>&1 | tee -a "$LOG"
 
+# ---------- Download scripts from GitHub ----------
+REPO_RAW="https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main"
+echo "Downloading scripts from GitHub..." | tee -a "$LOG"
+
+curl -fsSL -o /workspace/patch_vlm_packing.py "$REPO_RAW/v1.2/scripts/patch_vlm_packing.py" 2>&1 | tee -a "$LOG"
+curl -fsSL -o /workspace/train_unsloth.py "$REPO_RAW/v1.2/scripts/train_unsloth.py" 2>&1 | tee -a "$LOG"
+
+echo "  Downloaded patch_vlm_packing.py and train_unsloth.py" | tee -a "$LOG"
+
 # ---------- VLM Packing Patch ----------
-PATCH_SCRIPT="/workspace/patch_vlm_packing.py"
-if [ -f "$PATCH_SCRIPT" ]; then
-    echo "Applying VLM packing unblock patch..." | tee -a "$LOG"
-    python3 "$PATCH_SCRIPT" 2>&1 | tee -a "$LOG"
-else
-    echo "WARNING: patch_vlm_packing.py not found at $PATCH_SCRIPT" | tee -a "$LOG"
-    echo "Download it: curl -o $PATCH_SCRIPT https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/patch_vlm_packing.py" | tee -a "$LOG"
-fi
+echo "Applying VLM packing unblock patch..." | tee -a "$LOG"
+python3 /workspace/patch_vlm_packing.py 2>&1 | tee -a "$LOG"
+
+# ---------- Pre-download model ----------
+echo "Pre-downloading Qwen3.5-9B model..." | tee -a "$LOG"
+python3 -c "
+from transformers import AutoTokenizer, AutoConfig
+print('Downloading tokenizer...')
+AutoTokenizer.from_pretrained('Qwen/Qwen3.5-9B')
+print('Downloading config...')
+AutoConfig.from_pretrained('Qwen/Qwen3.5-9B')
+print('Model files will be downloaded on first training run (FastVisionModel handles this)')
+" 2>&1 | tee -a "$LOG"
 
 # ---------- Verify ----------
 echo "" | tee -a "$LOG"
