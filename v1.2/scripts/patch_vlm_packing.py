@@ -66,11 +66,9 @@ def patch_trainer(path):
     # 3. Remove is_vlm from the blocked condition
     content = content.replace("            or is_vlm\n", "")
 
-    # 4. Remove the VLM reason message
+    # 4. Remove the VLM reason message (keep the newline so next elif stays on its own line)
     vlm_reason_pattern = re.compile(
-        r"\s*elif is_vlm:\n"
-        r'\s*reason = "vision-language model"\n',
-        re.MULTILINE,
+        r'            elif is_vlm:\n                reason = "vision-language model"\n',
     )
     content = vlm_reason_pattern.sub("", content)
 
