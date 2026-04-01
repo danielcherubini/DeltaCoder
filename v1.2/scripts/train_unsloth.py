@@ -252,9 +252,13 @@ def main():
             )
         )
         print(f"  Loaded {len(dataset):,} rows, columns: {dataset.column_names}")
-        total_tokens = sum(len(ids) for ids in dataset["input_ids"])
-        print(f"  Total tokens: {total_tokens:,}")
-        print(f"  Avg sequence length: {total_tokens / len(dataset):.0f}")
+        # Quick stats from first 1000 rows (full scan is too slow for 262K rows)
+        sample_lens = [
+            len(dataset[i]["input_ids"]) for i in range(min(1000, len(dataset)))
+        ]
+        avg_sample = sum(sample_lens) / len(sample_lens)
+        print(f"  Sample avg seq length (first 1K): {avg_sample:.0f}")
+        print(f"  Estimated total tokens: {avg_sample * len(dataset):,.0f}")
         use_text_field = False
     else:
         print(f"\nLoading raw JSONL dataset from {args.data}...")
