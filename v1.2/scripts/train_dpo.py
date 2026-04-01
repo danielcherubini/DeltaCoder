@@ -138,7 +138,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(
             args.sft_model,
             torch_dtype=torch.bfloat16,
-            attn_implementation="eager",
+            attn_implementation="sdpa",
             trust_remote_code=True,
         )
         tokenizer = AutoTokenizer.from_pretrained(
@@ -149,7 +149,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(
             BASE_MODEL_NAME,
             torch_dtype=torch.bfloat16,
-            attn_implementation="eager",
+            attn_implementation="sdpa",
             trust_remote_code=True,
         )
         model = PeftModel.from_pretrained(model, args.sft_adapter)
@@ -197,12 +197,12 @@ def main():
     # ---------- DPO Config ----------
     dpo_config_kwargs = dict(
         beta=0.1,  # DPO temperature
-        loss_type="sigmoid",  # Standard DPO loss
+        loss_type=["sigmoid"],  # Standard DPO loss (TRL 1.0 expects list)
         max_length=MAX_SEQ_LENGTH,  # Max total (prompt + response) length
-        max_prompt_length=1024,  # Max prompt length before truncation
+        truncation_mode="keep_start",  # Truncate from end if too long
         dataset_num_proc=1,  # Qwen3.5 tokenizer crashes with multiprocessing
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,  # Effective batch size = 16
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=8,  # Effective batch size = 16
         num_train_epochs=1,
         learning_rate=5e-6,  # ~20x lower than SFT — DPO is LR-sensitive
         lr_scheduler_type="cosine",
