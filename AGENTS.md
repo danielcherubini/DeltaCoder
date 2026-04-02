@@ -423,8 +423,11 @@ Tested on 2x A100 SXM4 80GB, 20 steps, using `torchrun --nproc_per_node=2`:
 - GitHub #4485: VLM DDP slow with actual vision data — we do text-only, no issue
 - GitHub #4066: VLM DDP device mismatch with `device_map="balanced"` — we don't use device_map
 
-### RTX PRO 6000 Blackwell Compatibility
-- **96GB GDDR7 VRAM** — fits bf16 LoRA (~65GB peak)
-- **causal-conv1d supports Blackwell** — source includes SM 10.0 (compute_100) and SM 12.0 (compute_120)
+### RTX PRO 6000 Blackwell Compatibility (VALIDATED 2026-04-02)
+- **96GB GDDR7 VRAM** — uses only 59GB with Unsloth's smart gradient offloading (40% headroom)
+- **81.7s/step** — faster than A100 SXM (84s), slower than H100 SXM (59s)
+- **SM 12.0** compute capability — causal-conv1d compiles for it (compute_120)
 - provision.sh auto-detects GPU SM arch, works on Blackwell
-- Estimated step time: ~70-80s (higher TFLOPS than A100 but lower memory bandwidth)
+- **Must use `vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26`** — CUDA 13.1 image causes mismatch. CUDA 12.9 toolkit supports SM 12.0.
+- Vast.ai: $0.83/hr (Spain), RunPod: $1.64/hr
+- Full training: 10,779 steps × 82s = ~245h × $0.83 = **~$204** (cheapest validated option)
