@@ -1,12 +1,13 @@
-# AGENTS.md — DeltaCoder v1.2
+# AGENTS.md — DeltaCoder v1.3
 
 ## 1. Project Overview
 
-**DeltaCoder** is a code-specialized LLM trained on Qwen3.5-9B with:
-- **v1.2**: SFT + DPO at 32768 context (full reasoning traces)
+**DeltaCoder** is a code-specialized LLM fine-tune:
+- **v1.2**: SFT + DPO on Qwen3.5-9B at 32768 context (completed pipeline, all scripts validated)
+- **v1.3**: SFT + DPO on **Qwen3.6** (BLOCKED — waiting for open weights release)
 - Priorities (in order): (1) Coding, (2) Tool Calling, (3) Agentic Workflows
 - Target: THE BEST 9B for those three tasks
-- **MUST preserve vision capabilities** — Qwen3.5-9B is a VLM
+- **MUST preserve vision capabilities** — base models are VLMs
 
 ## 2. Repository Structure
 
@@ -27,7 +28,8 @@ DeltaCoder/
 │   └── v1.2_axolotl_train.log
 ├── v1.3/
 │   ├── configs/       # v1.3 Axolotl config (sequence_len=32768)
-│   └── scripts/       # v1.3 scripts (pretokenize.py with 32K context)
+│   ├── scripts/       # v1.3 scripts (all adapted from v1.2 for Qwen3.6)
+│   └── data/          # v1.3 training data (gitignored)
 ├── docs/              # Documentation + plans
 ├── AGENTS.md          # This file
 └── README.md
@@ -287,7 +289,12 @@ def main():
 | `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
 | `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
 | `v1.2/scripts/generate_dpo_pairs.py` | Generate on-policy DPO pairs via OpenAI-compatible API |
-| `v1.3/scripts/pretokenize.py` | Tokenize v1.3 data (32768 context) |
+| `v1.3/scripts/pretokenize_for_sft.py` | Pre-tokenize v1.3 data for Qwen3.6 (32768 context) |
+| `v1.3/scripts/train_unsloth.py` | v1.3 SFT training (adapted for Qwen3.6) |
+| `v1.3/scripts/provision.sh` | v1.3 Vast.ai bootstrap (adapted for Qwen3.6) |
+| `v1.3/scripts/train_dpo.py` | v1.3 DPO training (adapted for Qwen3.6) |
+| `v1.3/scripts/merge_and_export_dpo.py` | v1.3 merge LoRA + GGUF export |
+| `v1.3/scripts/generate_dpo_pairs.py` | v1.3 DPO pair generation |
 
 ## 7. Training Monitoring
 
@@ -304,13 +311,20 @@ grep -E "^\s*loss:" logs/v1.3_axolotl_train.log | tail -n 50
 
 ## 8. HuggingFace Repos
 
-- `danielcherubini/Qwen3.5-DeltaCoder-9B` — DPO adapter
-- `danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF` — GGUF quantizations
+- `danielcherubini/Qwen3.5-DeltaCoder-9B` — v1.1/v1.2 DPO adapter
+- `danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF` — v1.1/v1.2 GGUF quantizations
+- `danielcherubini/Qwen3.6-DeltaCoder-9B` — v1.3 adapter (TODO: create when ready)
+- `danielcherubini/Qwen3.6-DeltaCoder-9B-GGUF` — v1.3 GGUFs (TODO: create when ready)
 
 ## 9. v1.3 Structure
 
 - `v1.3/configs/axolotl.yaml` — 32768 sequence length config
-- `v1.3/scripts/pretokenize.py` — 32K context pretokenization
+- `v1.3/scripts/pretokenize_for_sft.py` — 32K context pretokenization for Qwen3.6
+- `v1.3/scripts/train_unsloth.py` — SFT training for Qwen3.6
+- `v1.3/scripts/provision.sh` — Vast.ai bootstrap for Qwen3.6
+- `v1.3/scripts/train_dpo.py` — DPO training for Qwen3.6
+- `v1.3/scripts/generate_dpo_pairs.py` — DPO pair generation
+- `v1.3/scripts/merge_and_export_dpo.py` — Merge + GGUF export
 
 ## 10. Quick Commands
 
@@ -322,10 +336,10 @@ python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2
 python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2 --ling-coder 50000
 
 # v1.3 pretokenize (32K context)
-python v1.3/scripts/pretokenize.py v1.2/data/v1.2_sft_train.jsonl /dev/shm/train_tokenized_v1.3.jsonl 1
+python v1.3/scripts/pretokenize_for_sft.py --data v1.2/data/v1.2_sft_train_pruned.jsonl --output v1.3/data/v1.3_pretokenized.parquet
 
-# Dry run v1.3 (verify memory)
-accelerate launch -m axolotl.cli.train v1.3/configs/axolotl.yaml --max_steps=20
+# v1.3 dry run
+python v1.3/scripts/train_unsloth.py --data /workspace/v1.3_pretokenized.parquet --max-steps 20
 
 # Merge + export to GGUF
 python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
