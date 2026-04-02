@@ -91,7 +91,7 @@ Must download and run `provision.sh` manually after SSH.
 everything in ~4 minutes on a fresh H100 instance:
 1. Creates Python 3.12 venv at `/workspace/venv/`
 2. Installs Unsloth 2026.3.18 + all dependencies
-3. Clones + patches causal-conv1d for SM 9.0 only (~3 min compile)
+3. Clones + patches causal-conv1d for detected GPU SM arch (~3 min compile)
 4. Installs flash-linear-attention
 5. Downloads train_unsloth.py + patch_vlm_packing.py from GitHub
 6. Applies VLM packing unblock patch
@@ -387,17 +387,44 @@ python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
 - **Trainable params**: 173M / 9.6B (1.81%)
 - **LoRA**: r=64, alpha=32, all GDN + attention + MLP targets
 
-### Training Cost Analysis (262K dataset)
-Full training (1 epoch) on 1x H100 SXM:
-- 42,976 packed examples, batch_size=1, grad_accum=4 -> 10,744 optimizer steps
-- ~59s/step -> **~176 hours (~7.3 days)** -> **~$378 at $2.15/hr**
-- Changing grad_accum does NOT reduce wall time — same number of forward/backward passes
-- batch_size must stay at 1 (GDN + packing limitation)
-- Multi-GPU untested with Unsloth + VLM packing patch
+### Training Cost Analysis (149K pruned dataset)
+Full training (1 epoch), 43,115 packed examples, batch_size=1, grad_accum=4:
 
-**Cost reduction options:**
-1. **Reduce dataset to ~100K rows** (RECOMMENDED): ~67 hrs, ~$144
-2. **Multi-GPU**: Linear speedup but untested with our patches
-3. **16K context**: ~2x faster but truncates reasoning traces
-4. **QLoRA (4-bit)**: ~2x faster forward pass but quality tradeoff
-5. **Lower LoRA rank** (r=32): Maybe 10-20% faster
+**Single GPU:**
+- 1x H100 SXM: 10,779 steps × 59s = ~177 hrs
+- 1x A100 SXM: 10,779 steps × 84s = ~252 hrs
+
+**Multi-GPU DDP (validated — see below):**
+- 2x A100 SXM: 5,390 steps × 101s = ~151 hrs
+- 2x H100 SXM: 5,390 steps × ~72s = ~108 hrs (estimated)
+- 4x H100 SXM: 2,695 steps × ~72s = ~54 hrs (estimated)
+
+batch_size must stay at 1 (GDN + packing limitation). Changing grad_accum changes optimizer
+steps but not total forward/backward passes.
+
+### DDP Multi-GPU Support (VALIDATED 2026-04-02)
+
+**Unsloth DDP works with our FastVisionModel + packing + frozen vision setup.**
+
+Tested on 2x A100 SXM4 80GB, 20 steps, using `torchrun --nproc_per_node=2`:
+- **~101s/step** steady state (converged to 100.86s)
+- **~65 GB VRAM per GPU**, 100% utilization on both
+- **Loss: 0.4821** (step 20), avg 0.8716, grad_norm 0.0312 — healthy
+- **No errors, no OOM, no NaN**
+- Total batch size = batch_size × grad_accum × num_GPUs (1 × 4 × 2 = 8)
+- Steps halved vs single GPU (data parallelism)
+
+**Required settings for DDP:**
+- `ddp_find_unused_parameters=False` in SFTConfig — frozen vision encoder creates unused params
+- Use `torchrun --nproc_per_node=N` or `accelerate launch` to start training
+- Each GPU needs full model in VRAM (~65GB) — DDP does NOT pool VRAM
+
+**Known issues (do NOT affect our setup):**
+- GitHub #4485: VLM DDP slow with actual vision data — we do text-only, no issue
+- GitHub #4066: VLM DDP device mismatch with `device_map="balanced"` — we don't use device_map
+
+### RTX PRO 6000 Blackwell Compatibility
+- **96GB GDDR7 VRAM** — fits bf16 LoRA (~65GB peak)
+- **causal-conv1d supports Blackwell** — source includes SM 10.0 (compute_100) and SM 12.0 (compute_120)
+- provision.sh auto-detects GPU SM arch, works on Blackwell
+- Estimated step time: ~70-80s (higher TFLOPS than A100 but lower memory bandwidth)

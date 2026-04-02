@@ -323,6 +323,7 @@ def main():
         dataset_num_proc=1,  # CRITICAL: Qwen3.5 tokenizer crashes with multiprocessing
         packing=True,  # Enabled! Requires VLM packing unblock patch on trainer.py
         report_to="none",
+        ddp_find_unused_parameters=False,  # Vision encoder is frozen — unused params in DDP
     )
 
     # Only set dataset_text_field for raw JSONL mode (text column)
