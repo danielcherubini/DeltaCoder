@@ -28,7 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Pre-tokenize for SFTTrainer")
     parser.add_argument("--data", required=True, help="Path to training JSONL")
     parser.add_argument(
-        "--output", required=True, help="Output directory for HF Dataset"
+        "--output", required=True, help="Output parquet file or directory"
     )
     parser.add_argument("--max-seq-length", type=int, default=32768)
     return parser.parse_args()
@@ -71,20 +71,27 @@ def normalize_messages(messages):
 def main():
     args = parse_args()
 
-    if os.path.isdir(args.output) and any(
-        f.endswith(".parquet") for f in os.listdir(args.output)
+    # Check for existing output (single file or directory with parquet)
+    output_check = args.output
+    if output_check.endswith(".parquet") and os.path.isfile(output_check):
+        import pyarrow.parquet as pq
+
+        print(f"Output already exists at {output_check} — delete it to re-tokenize")
+        meta = pq.read_metadata(output_check)
+        print(f"  {meta.num_rows:,} rows")
+        return
+    elif os.path.isdir(output_check) and any(
+        f.endswith(".parquet") for f in os.listdir(output_check)
     ):
         import pyarrow.parquet as pq
 
-        print(f"Output already exists at {args.output} — delete it to re-tokenize")
-        ds = pq.ParquetDataset(args.output)
-        schema = ds.schema
+        print(f"Output already exists at {output_check} — delete it to re-tokenize")
         total = sum(
-            pq.read_metadata(os.path.join(args.output, f)).num_rows
-            for f in sorted(os.listdir(args.output))
+            pq.read_metadata(os.path.join(output_check, f)).num_rows
+            for f in sorted(os.listdir(output_check))
             if f.endswith(".parquet")
         )
-        print(f"  {total:,} rows, columns: {schema.names}")
+        print(f"  {total:,} rows")
         return
 
     print(f"Loading tokenizer from {BASE_MODEL}...")
@@ -121,23 +128,18 @@ def main():
         f"  Applied template to {len(texts):,} rows ({skipped} skipped) in {time.time() - t0:.1f}s"
     )
 
-    # Step 2: Tokenize and save in batches (avoids OOM on 64GB machines)
+    # Step 2: Tokenize all rows
     import pyarrow as pa
     import pyarrow.parquet as pq
     from pathlib import Path
 
-    BATCH_SIZE = 50000  # Write to disk every 50K rows to limit memory
-
-    os.makedirs(args.output, exist_ok=True)
     print(f"Tokenizing {len(texts):,} rows (max_seq_length={args.max_seq_length})...")
     t1 = time.time()
 
-    batch_input_ids = []
-    batch_attention_mask = []
-    batch_labels = []
+    all_input_ids = []
+    all_attention_mask = []
+    all_labels = []
     total_tokens = 0
-    total_rows = 0
-    shard_idx = 0
 
     for i, text in enumerate(texts):
         encoded = tokenizer(
@@ -152,66 +154,48 @@ def main():
         # For SFT, labels = input_ids (shifted internally by the model)
         labels = input_ids.copy()
 
-        batch_input_ids.append(input_ids)
-        batch_attention_mask.append(attention_mask)
-        batch_labels.append(labels)
+        all_input_ids.append(input_ids)
+        all_attention_mask.append(attention_mask)
+        all_labels.append(labels)
         total_tokens += len(input_ids)
-        total_rows += 1
 
-        # Write batch to disk as parquet shard
-        if len(batch_input_ids) >= BATCH_SIZE:
+        if (i + 1) % 50000 == 0:
             elapsed = time.time() - t1
             print(
-                f"  {total_rows:,}/{len(texts):,} tokenized in {elapsed:.1f}s "
-                f"({total_rows / elapsed:.0f} rows/s) — writing shard {shard_idx}..."
+                f"  {i + 1:,}/{len(texts):,} tokenized in {elapsed:.1f}s "
+                f"({(i + 1) / elapsed:.0f} rows/s)"
             )
-            table = pa.table(
-                {
-                    "input_ids": pa.array(batch_input_ids, type=pa.list_(pa.int32())),
-                    "attention_mask": pa.array(
-                        batch_attention_mask, type=pa.list_(pa.int32())
-                    ),
-                    "labels": pa.array(batch_labels, type=pa.list_(pa.int32())),
-                }
-            )
-            pq.write_table(
-                table,
-                os.path.join(args.output, f"shard_{shard_idx:04d}.parquet"),
-            )
-            batch_input_ids.clear()
-            batch_attention_mask.clear()
-            batch_labels.clear()
-            shard_idx += 1
-
-    # Write remaining rows
-    if batch_input_ids:
-        print(f"  Writing final shard {shard_idx} ({len(batch_input_ids):,} rows)...")
-        table = pa.table(
-            {
-                "input_ids": pa.array(batch_input_ids, type=pa.list_(pa.int32())),
-                "attention_mask": pa.array(
-                    batch_attention_mask, type=pa.list_(pa.int32())
-                ),
-                "labels": pa.array(batch_labels, type=pa.list_(pa.int32())),
-            }
-        )
-        pq.write_table(
-            table,
-            os.path.join(args.output, f"shard_{shard_idx:04d}.parquet"),
-        )
-        shard_idx += 1
 
     elapsed = time.time() - t1
-    print(f"  Tokenized {total_rows:,} rows in {elapsed:.1f}s")
+    print(f"  Tokenized {len(all_input_ids):,} rows in {elapsed:.1f}s")
 
-    # Step 3: Stats
+    # Step 3: Save as single parquet file
+    output_path = args.output
+    if not output_path.endswith(".parquet"):
+        # If output is a directory path, make it a single file instead
+        os.makedirs(output_path, exist_ok=True)
+        output_path = os.path.join(output_path, "data.parquet")
+
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    print(f"Saving to {output_path}...")
+    table = pa.table(
+        {
+            "input_ids": pa.array(all_input_ids, type=pa.list_(pa.int32())),
+            "attention_mask": pa.array(all_attention_mask, type=pa.list_(pa.int32())),
+            "labels": pa.array(all_labels, type=pa.list_(pa.int32())),
+        }
+    )
+    pq.write_table(table, output_path)
+
+    # Stats
+    total_rows = len(all_input_ids)
     avg_len = total_tokens / total_rows if total_rows > 0 else 0
     print(f"  Total tokens: {total_tokens:,}")
     print(f"  Avg sequence length: {avg_len:.0f}")
-    print(f"  Shards written: {shard_idx}")
-    disk_size = sum(
-        f.stat().st_size for f in Path(args.output).rglob("*") if f.is_file()
-    )
+    disk_size = Path(output_path).stat().st_size
     print(f"  Dataset size on disk: {disk_size / 1024**3:.2f} GB")
     print("Done!")
 

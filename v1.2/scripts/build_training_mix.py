@@ -4,14 +4,18 @@ Build the DeltaCoder v1.2 training mix from preprocessed dataset files.
 Combines all preprocessed JSONL files into a single shuffled training file.
 Each source is capped to its target row count.
 
-Target mix (~262K rows):
-  - Nemotron tool_calling:     80K  (tool calling)
-  - opencoder_reasoning:       50K  (coding)
-  - code_feedback:             40K  (coding)
-  - magicoder:                 30K  (coding)
-  - SWE-smith:                 30K  (agentic)
-  - Nemotron interactive_agent: 17K (agent + tool calling)
-  - xlam:                      15K  (tool calling)
+Pruned mix (~149K rows, quality-filtered):
+  - Nemotron tool_calling:     40K  (tool calling — top 50% by complexity)
+  - opencoder_reasoning:       25K  (coding — top by reasoning trace length)
+  - swesmith:                  20K  (agentic — ≥3 tool calls per trajectory)
+  - nemotron_agentic:          19K  (agent + tool calling — keep all)
+  - code_feedback:             15K  (coding — multi-turn ≥4 messages only)
+  - xlam:                      15K  (tool calling — keep all)
+  - nemotron_swe:              10K  (agentic — SWE problem-solving with tools)
+  - magicoder:                  5K  (coding — top by problem length)
+
+Previous mix (262K, unfiltered):
+  Use --use-unfiltered to build from the original *_converted.jsonl files.
 """
 
 import json
@@ -20,7 +24,20 @@ import sys
 from pathlib import Path
 
 # Source configs: (filename, max_rows, source_label)
-SOURCES = [
+# Pruned mix: quality-filtered files from v1.2_pruned/
+SOURCES_PRUNED = [
+    ("nemotron_tool_calling_filtered.jsonl", 40_000, "nemotron_tool_calling"),
+    ("opencoder_reasoning_filtered.jsonl", 25_000, "opencoder_reasoning"),
+    ("swesmith_filtered.jsonl", 20_000, "swesmith"),
+    ("nemotron_agentic_filtered.jsonl", 19_028, "nemotron_agentic"),
+    ("code_feedback_filtered.jsonl", 15_000, "code_feedback"),
+    ("xlam_filtered.jsonl", 15_000, "xlam"),
+    ("nemotron_swe_filtered.jsonl", 10_000, "nemotron_swe"),
+    ("magicoder_filtered.jsonl", 5_000, "magicoder"),
+]
+
+# Unfiltered mix: original *_converted.jsonl files
+SOURCES_UNFILTERED = [
     ("nemotron_tool_calling_converted.jsonl", 80_000, "nemotron_tool_calling"),
     ("opencoder_reasoning_converted.jsonl", 50_000, "opencoder_reasoning"),
     ("code_feedback_converted.jsonl", 40_000, "code_feedback"),
@@ -63,16 +80,21 @@ def main():
     parser = argparse.ArgumentParser(description="Build DeltaCoder v1.2 training mix")
     parser.add_argument(
         "--data-dir",
-        default="v1.2/data",
-        help="Directory containing preprocessed JSONL files",
+        default="v1.2/data/v1.2_pruned",
+        help="Directory containing preprocessed JSONL files (default: pruned)",
     )
     parser.add_argument(
         "--output",
-        default="v1.2/data/v1.2_sft_train.jsonl",
+        default="v1.2/data/v1.2_sft_train_pruned.jsonl",
         help="Output training JSONL",
     )
     parser.add_argument(
         "--seed", type=int, default=SEED, help="Random seed for shuffling"
+    )
+    parser.add_argument(
+        "--use-unfiltered",
+        action="store_true",
+        help="Use original unfiltered *_converted.jsonl files from v1.2/data/",
     )
     parser.add_argument(
         "--dry-run",
@@ -81,8 +103,17 @@ def main():
     )
     args = parser.parse_args()
 
-    data_dir = Path(args.data_dir)
-    output_path = Path(args.output)
+    # Select source list and data directory based on mode
+    if args.use_unfiltered:
+        sources = SOURCES_UNFILTERED
+        data_dir = Path("v1.2/data")
+        output_path = Path("v1.2/data/v1.2_sft_train.jsonl")
+        print("MODE: Unfiltered (original 262K mix)")
+    else:
+        sources = SOURCES_PRUNED
+        data_dir = Path(args.data_dir)
+        output_path = Path(args.output)
+        print("MODE: Pruned (quality-filtered ~149K mix)")
 
     print(f"Data directory: {data_dir}")
     print(f"Output: {output_path}")
@@ -92,7 +123,7 @@ def main():
     all_rows = []
     stats = {}
 
-    for filename, max_rows, label in SOURCES:
+    for filename, max_rows, label in sources:
         path = data_dir / filename
         if not path.exists():
             print(f"  MISSING: {filename} (expected {max_rows:,} rows)")

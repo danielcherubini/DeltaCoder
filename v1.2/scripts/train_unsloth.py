@@ -238,19 +238,24 @@ def main():
     # Load dataset — two modes:
     # 1. Pre-tokenized parquet dir (fast): has input_ids/attention_mask/labels columns
     # 2. Raw JSONL (slow): needs chat template + tokenization
-    is_pretokenized = os.path.isdir(args.data) and any(
+    is_pretokenized_dir = os.path.isdir(args.data) and any(
         f.endswith(".parquet") for f in os.listdir(args.data)
     )
+    is_pretokenized_file = args.data.endswith(".parquet") and os.path.isfile(args.data)
+    is_pretokenized = is_pretokenized_dir or is_pretokenized_file
 
     if is_pretokenized:
         print(f"\nLoading pre-tokenized dataset from {args.data}...")
-        dataset = Dataset.from_parquet(
-            sorted(
-                os.path.join(args.data, f)
-                for f in os.listdir(args.data)
-                if f.endswith(".parquet")
+        if is_pretokenized_file:
+            dataset = Dataset.from_parquet(args.data)
+        else:
+            dataset = Dataset.from_parquet(
+                sorted(
+                    os.path.join(args.data, f)
+                    for f in os.listdir(args.data)
+                    if f.endswith(".parquet")
+                )
             )
-        )
         print(f"  Loaded {len(dataset):,} rows, columns: {dataset.column_names}")
         # Quick stats from first 1000 rows (full scan is too slow for 262K rows)
         sample_lens = [
