@@ -45,10 +45,20 @@ uv pip install unsloth 2>&1 | tee -a "$LOG"
 echo "Installing flash-linear-attention..." | tee -a "$LOG"
 uv pip install flash-linear-attention 2>&1 | tee -a "$LOG"
 
-# ---------- Build causal-conv1d (SM 9.0 / H100 ONLY) ----------
+# ---------- Detect GPU SM architecture ----------
+SM_ARCH=$(python3 -c "
+import subprocess, re
+out = subprocess.check_output(['nvidia-smi', '--query-gpu=compute_cap', '--format=csv,noheader']).decode().strip().split('\n')[0]
+major, minor = out.strip().split('.')
+print(f'sm_{major}{minor}')
+" 2>/dev/null || echo "sm_90")
+SM_COMPUTE=$(echo "$SM_ARCH" | sed 's/sm_/compute_/')
+echo "Detected GPU architecture: $SM_ARCH ($SM_COMPUTE)" | tee -a "$LOG"
+
+# ---------- Build causal-conv1d (detected arch) ----------
 # causal-conv1d's setup.py HARDCODES all GPU architectures and ignores TORCH_CUDA_ARCH_LIST.
-# We must clone, patch setup.py to only build sm_90, then install from source.
-echo "Building causal-conv1d (SM 9.0 only)..." | tee -a "$LOG"
+# We must clone, patch setup.py to only build for the current GPU.
+echo "Building causal-conv1d ($SM_ARCH only)..." | tee -a "$LOG"
 
 CONV1D_DIR="/workspace/causal-conv1d"
 if [ -d "$CONV1D_DIR" ]; then
@@ -58,9 +68,12 @@ fi
 
 git clone https://github.com/Dao-AILab/causal-conv1d.git "$CONV1D_DIR" 2>&1 | tee -a "$LOG"
 
-# Patch setup.py: replace all hardcoded arch flags with just sm_90
-python3 - "$CONV1D_DIR/setup.py" << 'PYEOF'
-import sys
+# Patch setup.py: replace all hardcoded arch flags with detected GPU arch
+SM_ARCH_VAL="$SM_ARCH" SM_COMPUTE_VAL="$SM_COMPUTE" python3 - "$CONV1D_DIR/setup.py" << 'PYEOF'
+import sys, os
+
+sm_arch = os.environ["SM_ARCH_VAL"]
+sm_compute = os.environ["SM_COMPUTE_VAL"]
 
 setup_py = sys.argv[1]
 with open(setup_py, "r") as f:
@@ -74,8 +87,8 @@ old_block = '''        cc_flag.append("-gencode")
         cc_flag.append("-gencode")
         cc_flag.append("arch=compute_87,code=sm_87")'''
 
-new_block = '''        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_90,code=sm_90")'''
+new_block = f'''        cc_flag.append("-gencode")
+        cc_flag.append("arch={sm_compute},code={sm_arch}")'''
 
 if old_block not in content:
     if "arch=compute_75" not in content:

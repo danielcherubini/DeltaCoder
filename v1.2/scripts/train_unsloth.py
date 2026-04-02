@@ -102,6 +102,11 @@ def parse_args():
     parser.add_argument("--save-steps", type=int, default=500)
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--warmup-ratio", type=float, default=0.05)
+    parser.add_argument(
+        "--qlora",
+        action="store_true",
+        help="Use QLoRA (4-bit quantized base model) instead of bf16 LoRA",
+    )
     return parser.parse_args()
 
 
@@ -192,17 +197,28 @@ def main():
     print(f"Batch size: {args.batch_size}, Grad accum: {args.grad_accum}")
     print(f"Learning rate: {args.lr}")
     print(f"Max steps: {args.max_steps if args.max_steps > 0 else 'full epoch'}")
+    print(f"QLoRA (4-bit): {args.qlora}")
     print("=" * 60)
 
     # Load model with FastVisionModel (preserves full VLM including vision encoder)
     print("\nLoading model with FastVisionModel...")
-    model, tokenizer = FastVisionModel.from_pretrained(
-        model_name=BASE_MODEL,
-        max_seq_length=args.max_seq_length,
-        load_in_4bit=False,  # bf16 LoRA, no QLoRA for Qwen3.5
-        load_in_16bit=True,
-        full_finetuning=False,
-    )
+    if args.qlora:
+        print("  Using QLoRA — loading base model in 4-bit NF4")
+        model, tokenizer = FastVisionModel.from_pretrained(
+            model_name=BASE_MODEL,
+            max_seq_length=args.max_seq_length,
+            load_in_4bit=True,  # QLoRA: 4-bit quantized base
+            full_finetuning=False,
+        )
+    else:
+        print("  Using bf16 LoRA")
+        model, tokenizer = FastVisionModel.from_pretrained(
+            model_name=BASE_MODEL,
+            max_seq_length=args.max_seq_length,
+            load_in_4bit=False,
+            load_in_16bit=True,
+            full_finetuning=False,
+        )
 
     # Apply LoRA — ONLY language layers, freeze vision
     print("Applying LoRA adapters (language-only, vision frozen)...")
