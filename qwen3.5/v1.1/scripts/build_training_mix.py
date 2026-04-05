@@ -1,5 +1,5 @@
 """
-Build the DeltaCoder v1.2 training mix from preprocessed dataset files.
+Build the DeltaCoder Qwen3.5 v1.1 training mix from preprocessed dataset files.
 
 Combines all preprocessed JSONL files into a single shuffled training file.
 Each source is capped to its target row count.
@@ -34,7 +34,7 @@ from pathlib import Path
 
 # Source configs: (filename, max_rows, source_label)
 
-# Tier 1: ≤8K tokens (coding + tool calling) — token filtering done by filter_for_v12_pruned.py
+# Tier 1: ≤8K tokens (coding + tool calling) — token filtering done by filter_for_v12_pruned.py (v1.1)
 SOURCES_TIER1 = [
     ("nemotron_tool_calling_filtered.jsonl", 40_000, "nemotron_tool_calling"),
     ("competitive_programming_converted.jsonl", 28_000, "competitive_programming"),
@@ -45,7 +45,7 @@ SOURCES_TIER1 = [
     ("magicoder_filtered.jsonl", 5_000, "magicoder"),
 ]
 
-# Tier 2: ≤16K tokens (agentic/SWE) — token filtering done by filter_for_v12_pruned.py
+# Tier 2: ≤16K tokens (agentic/SWE) — token filtering done by filter_for_v12_pruned.py (v1.1)
 SOURCES_TIER2 = [
     ("opencoder_reasoning_filtered.jsonl", 16_025, "opencoder_reasoning"),
     ("swesmith_filtered.jsonl", 9_780, "swesmith"),
@@ -95,15 +95,17 @@ def validate_row(row: dict) -> bool:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build DeltaCoder v1.2 training mix")
+    parser = argparse.ArgumentParser(
+        description="Build DeltaCoder Qwen3.5 v1.1 training mix"
+    )
     parser.add_argument(
         "--data-dir",
-        default="v1.2/data/v1.2_pruned",
+        default="qwen3.5/v1.1/data/v1.1_pruned",
         help="Directory containing preprocessed JSONL files",
     )
     parser.add_argument(
         "--output",
-        default="v1.2/data/v1.2_sft_train_pruned.jsonl",
+        default="qwen3.5/v1.1/data/v1.1_sft_train_pruned.jsonl",
         help="Output training JSONL",
     )
     parser.add_argument(
@@ -124,8 +126,8 @@ def main():
     # Select source list and data directory based on mode
     if args.use_unfiltered:
         sources = SOURCES_UNFILTERED
-        data_dir = Path("v1.2/data")
-        output_path = Path("v1.2/data/v1.2_sft_train.jsonl")
+        data_dir = Path("qwen3.5/v1.1/data")
+        output_path = Path("qwen3.5/v1.1/data/v1.1_sft_train.jsonl")
         print("MODE: Unfiltered (original 262K mix)")
     else:
         sources = SOURCES_PRUNED

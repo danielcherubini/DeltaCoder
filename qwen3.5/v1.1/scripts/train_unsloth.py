@@ -1,5 +1,5 @@
 """
-DeltaCoder v1.2 SFT training with Unsloth + Qwen3.5-9B.
+DeltaCoder Qwen3.5 v1.1 SFT training with Unsloth + Qwen3.5-9B.
 
 Uses FastVisionModel to load the full VLM (preserving vision weights),
 but only trains language layers via finetune_vision_layers=False.
@@ -15,16 +15,16 @@ Jackrong-inspired training approach (2026-04-05):
   - Quality > quantity: tiered token-filtered dataset (~157K rows, ~700M tokens)
 
 Supports two data input modes:
-  1. Raw JSONL (--data /path/to/v1.2_sft_train.jsonl) — tokenizes on-the-fly
-  2. Pre-tokenized parquet (--data /path/to/v1.2_pretokenized.parquet) — skips tokenization
+  1. Raw JSONL (--data /path/to/v1.1_sft_train.jsonl) — tokenizes on-the-fly
+  2. Pre-tokenized parquet (--data /path/to/v1.1_pretokenized.parquet) — skips tokenization
 
 Pre-tokenized mode is ~100x faster to start since rows are already tokenized.
 
 Usage:
-    python train_unsloth.py --data /workspace/v1.2_pretokenized.parquet
-    python train_unsloth.py --data /workspace/v1.2_pretokenized.parquet --max-steps 20  # dry run
-    python train_unsloth.py --data /workspace/v1.2_sft_train.jsonl  # raw JSONL fallback
-    python train_unsloth.py --data /workspace/v1.2_pretokenized.parquet --no-response-only  # ablation
+    python train_unsloth.py --data /workspace/v1.1_pretokenized.parquet
+    python train_unsloth.py --data /workspace/v1.1_pretokenized.parquet --max-steps 20  # dry run
+    python train_unsloth.py --data /workspace/v1.1_sft_train.jsonl  # raw JSONL fallback
+    python train_unsloth.py --data /workspace/v1.1_pretokenized.parquet --no-response-only  # ablation
 """
 
 import argparse
@@ -67,7 +67,7 @@ BASE_MODEL = "Qwen/Qwen3.5-9B"
 MAX_SEQ_LENGTH = 32768
 LORA_R = 64
 LORA_ALPHA = 64  # 1:1 ratio with r — Jackrong-validated setting (was 32)
-OUTPUT_DIR = "./outputs/deltacoder-9b-v1.2"
+OUTPUT_DIR = "./outputs/deltacoder-9b-v1.1"
 
 # Qwen3.5 GDN + Attention + MLP target modules
 LORA_TARGET_MODULES = [
@@ -90,7 +90,9 @@ LORA_TARGET_MODULES = [
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="DeltaCoder v1.2 SFT with Unsloth")
+    parser = argparse.ArgumentParser(
+        description="DeltaCoder Qwen3.5 v1.1 SFT with Unsloth"
+    )
     parser.add_argument(
         "--data",
         required=True,
@@ -202,7 +204,7 @@ def main():
     args = parse_args()
 
     print("=" * 60)
-    print("DeltaCoder v1.2 SFT Training (FastVisionModel + Packing)")
+    print("DeltaCoder Qwen3.5 v1.1 SFT Training (FastVisionModel + Packing)")
     print(f"Model: {BASE_MODEL}")
     print(f"Max seq length: {args.max_seq_length}")
     print(f"LoRA r={args.lora_r}, alpha={args.lora_alpha}")

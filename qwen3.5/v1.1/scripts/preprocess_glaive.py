@@ -1,5 +1,5 @@
 """
-Preprocess Glaive Function-Calling v2 for DeltaCoder v1.2 SFT.
+Preprocess Glaive Function-Calling v2 for DeltaCoder Qwen3.5 v1.1 SFT.
 
 Input: glaiveai/glaive-function-calling-v2 (HuggingFace)
 Output: data/glaive_converted.jsonl

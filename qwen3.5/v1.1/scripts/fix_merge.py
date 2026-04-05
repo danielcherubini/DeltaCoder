@@ -1,5 +1,5 @@
 """
-Fix DeltaCoder v1.2 merge: SFT LoRA keys have 'language_model.' prefix
+Fix DeltaCoder Qwen3.5 v1.1 merge: SFT LoRA keys have 'language_model.' prefix
 that doesn't match AutoModelForCausalLM (text-only) module paths.
 
 Remaps SFT adapter keys, then does proper two-stage merge:
@@ -8,9 +8,9 @@ Remaps SFT adapter keys, then does proper two-stage merge:
 
 Run on Romulus:
   python fix_merge.py --base-model Qwen/Qwen3.5-9B ^
-      --sft-adapter D:\AI\DeltaCoder\v1.2\sft_adapter ^
-      --dpo-adapter D:\AI\DeltaCoder\v1.2\dpo_adapter ^
-      --output-dir D:\AI\DeltaCoder\v1.2\merged_fixed
+      --sft-adapter D:\AI\DeltaCoder\qwen3.5\v1.1\sft_adapter ^
+      --dpo-adapter D:\AI\DeltaCoder\qwen3.5\v1.1\dpo_adapter ^
+      --output-dir D:\AI\DeltaCoder\qwen3.5\v1.1\merged_fixed
 """
 
 import argparse

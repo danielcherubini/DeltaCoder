@@ -1,5 +1,5 @@
 """
-Preprocess reasoning datasets for DeltaCoder v1.2 SFT.
+Preprocess reasoning datasets for DeltaCoder Qwen3.5 v1.1 SFT.
 
 Input:
   - nohurry/Opus-4.6-Reasoning-3000x-filtered

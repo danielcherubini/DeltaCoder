@@ -1,5 +1,5 @@
 """
-Preprocess Magicoder-OSS-Instruct-75K for DeltaCoder v1.2 SFT.
+Preprocess Magicoder-OSS-Instruct-75K for DeltaCoder Qwen3.5 v1.1 SFT.
 
 Input: ise-uiuc/Magicoder-OSS-Instruct-75K (HuggingFace)
 Output: data/magicoder_converted.jsonl

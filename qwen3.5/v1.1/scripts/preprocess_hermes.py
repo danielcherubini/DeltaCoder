@@ -1,5 +1,5 @@
 """
-Preprocess Hermes Function-Calling v1 for DeltaCoder v1.2 SFT.
+Preprocess Hermes Function-Calling v1 for DeltaCoder Qwen3.5 v1.1 SFT.
 
 Input: NousResearch/hermes-function-calling-v1 (all 5 subsets)
 Output: data/hermes_converted.jsonl

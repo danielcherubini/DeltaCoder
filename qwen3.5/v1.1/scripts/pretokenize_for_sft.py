@@ -1,5 +1,5 @@
 """
-Pre-tokenize v1.2 training data for SFTTrainer with packing.
+Pre-tokenize v1.1 training data for SFTTrainer with packing.
 
 Applies the chat template and tokenizes all 262K rows, saving the result
 as a HF Dataset on disk. The training script loads this directly, skipping
@@ -9,7 +9,7 @@ Output dataset has columns: input_ids, attention_mask, labels
 SFTTrainer with packing=True detects these and skips its own tokenization.
 
 Usage:
-    python pretokenize_for_sft.py --data /workspace/v1.2_sft_train.jsonl --output /workspace/v1.2_pretokenized --max-seq-length 32768
+    python pretokenize_for_sft.py --data /workspace/v1.1_sft_train.jsonl --output /workspace/v1.1_pretokenized --max-seq-length 32768
 """
 
 import argparse

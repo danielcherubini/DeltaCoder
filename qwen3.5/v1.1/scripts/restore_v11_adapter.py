@@ -6,7 +6,7 @@ from huggingface_hub import HfApi
 
 TOKEN = os.environ["HF_TOKEN"]
 REPO = "danielcherubini/Qwen3.5-DeltaCoder-9B"
-ADAPTER_DIR = Path("v1.1/outputs/deltacoder-9b-dpo/lora_adapter")
+ADAPTER_DIR = Path("qwen3.5/v1.0/outputs/deltacoder-9b-dpo/lora_adapter")
 
 api = HfApi(token=TOKEN)
 

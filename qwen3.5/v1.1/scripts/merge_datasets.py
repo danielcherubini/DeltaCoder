@@ -1,13 +1,13 @@
 """
 Merge all preprocessed datasets into a single training JSONL.
 
-v1.2 mix (all coding-focused):
+v1.1 mix (all coding-focused):
   - data/magicoder_converted.jsonl            (~50K — code generation)
   - data/coderforge_converted.jsonl           (~50K — SWE-agent tool use)
   - data/code_feedback_converted.jsonl        (~50K — multi-turn code revision)
   - data/xlam_converted.jsonl                 (~15K — verified function calling)
 
-Shuffles the result and writes to data/v1.2_sft_train.jsonl.
+Shuffles the result and writes to data/v1.1_sft_train.jsonl.
 """
 
 import json
@@ -36,7 +36,7 @@ def load_jsonl(path: str) -> list[dict]:
 
 
 def main():
-    output = sys.argv[1] if len(sys.argv) > 1 else "data/v1.2_sft_train.jsonl"
+    output = sys.argv[1] if len(sys.argv) > 1 else "data/v1.1_sft_train.jsonl"
     seed = int(sys.argv[2]) if len(sys.argv) > 2 else 42
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)

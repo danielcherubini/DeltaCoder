@@ -9,9 +9,9 @@ Two-stage merge:
   5. Upload to HuggingFace (optional)
 
 Usage:
-    # v1.2 — pre-merged SFT model:
-    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
-        --filename-prefix DeltaCoder-9B-v1.2-DPO
+    # v1.1 — pre-merged SFT model:
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.1 \
+        --filename-prefix DeltaCoder-9B-v1.1-DPO
 
     # v1.3 — pre-merged SFT model, keep merged for eval before teardown:
     python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.3 \
@@ -35,7 +35,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
-FILENAME_PREFIX_DEFAULT = "DeltaCoder-9B-v1.2-DPO"
+FILENAME_PREFIX_DEFAULT = "DeltaCoder-9B-v1.1-DPO"
 QUANTS = [
     "Q2_K",
     "Q3_K_S",
@@ -72,25 +72,25 @@ def parse_args():
     parser.add_argument(
         "--sft-adapter",
         type=str,
-        default="./outputs/deltacoder-9b-v1.2",
-        help="v1.2 SFT LoRA adapter (used if --sft-model not set)",
+        default="./outputs/deltacoder-9b-v1.1",
+        help="v1.1 SFT LoRA adapter (used if --sft-model not set)",
     )
     parser.add_argument(
         "--dpo-adapter",
         type=str,
-        default="./outputs/deltacoder-9b-v1.2-dpo/lora_adapter",
+        default="./outputs/deltacoder-9b-v1.1-dpo/lora_adapter",
         help="DPO LoRA adapter (local path)",
     )
     parser.add_argument(
         "--merged-dir",
         type=str,
-        default="./outputs/deltacoder-9b-v1.2-dpo-merged",
+        default="./outputs/deltacoder-9b-v1.1-dpo-merged",
         help="Output directory for merged bf16 model",
     )
     parser.add_argument(
         "--gguf-dir",
         type=str,
-        default="./outputs/deltacoder-9b-v1.2-dpo-gguf",
+        default="./outputs/deltacoder-9b-v1.1-dpo-gguf",
         help="Output directory for GGUF files",
     )
     parser.add_argument(

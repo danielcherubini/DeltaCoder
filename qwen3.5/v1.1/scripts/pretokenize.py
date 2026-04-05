@@ -17,7 +17,7 @@ import multiprocessing as mp
 from functools import partial
 from transformers import AutoTokenizer
 
-SEQUENCE_LEN = 32768  # 32K context for v1.2 redo
+SEQUENCE_LEN = 32768  # 32K context for Qwen3.5 v1.1
 MODEL_ID = "Qwen/Qwen3.5-9B"
 
 # Qwen3.5 chat template format:

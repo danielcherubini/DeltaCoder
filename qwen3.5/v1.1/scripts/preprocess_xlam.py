@@ -1,5 +1,5 @@
 """
-Preprocess Salesforce/xlam-function-calling-60k for DeltaCoder v1.2 SFT.
+Preprocess Salesforce/xlam-function-calling-60k for DeltaCoder Qwen3.5 v1.1 SFT.
 
 Input: Salesforce/xlam-function-calling-60k (60K verified function-calling samples)
 Output: data/xlam_converted.jsonl
