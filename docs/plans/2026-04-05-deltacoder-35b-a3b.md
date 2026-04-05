@@ -26,7 +26,7 @@
 - **Disk:** ~250GB needed for merge+GGUF pipeline (model cache 70GB + merged 70GB + GGUF 70GB)
 
 ### Key Differences from 9B Dense Pipeline
-| Aspect | 9B (v1.2) | 35B-A3B |
+| Aspect | 9B (qwen3.5/v1.1) | 35B-A3B |
 |--------|-----------|---------|
 | Loader | `FastVisionModel` | `FastLanguageModel` |
 | VLM packing hack | Required | Not needed — `FastLanguageModel` doesn't check `is_vlm` |
@@ -68,7 +68,7 @@ Unsloth auto-detects MoE and maps `gate_proj`/`up_proj`/`down_proj`/`gate_up_pro
 
 ## Dataset: Coding-Heavy ~5K Row Subset
 
-Curated from our existing preprocessed v1.2 data sources:
+Curated from our existing preprocessed v1.1 data sources:
 
 | Source | Rows | Notes |
 |--------|------|-------|
@@ -134,23 +134,23 @@ Note: MoE GGUF files are large even quantized (~20GB for Q4_K_M). The model need
 
 ## Tasks
 
-### Task 1: Create `v1.2/scripts/build_35b_subset.py` — Curate 5K Row Training Subset
+### Task 1: Create `qwen3.5/35b-a3b/scripts/build_35b_subset.py` — Curate 5K Row Training Subset
 
 **Context:**
 We need a script that samples our existing preprocessed `*_converted.jsonl` files to create a small, coding-focused 5K row dataset for the 35B-A3B fine-tune. This script reads from the same data sources as `build_training_mix.py` but targets specific sources and row counts. The output is a single shuffled JSONL file.
 
 **Files:**
-- Create: `v1.2/scripts/build_35b_subset.py`
+- Create: `qwen3.5/35b-a3b/scripts/build_35b_subset.py`
 
 **What to implement:**
 A script that:
-- Takes `--data-dir` (default: `v1.2/data/v1.2_pruned`) and `--output` (default: `v1.2/data/v1.2_35b_sft.jsonl`)
+- Takes `--data-dir` (default: `qwen3.5/v1.1/data/v1.1_pruned`) and `--output` (default: `qwen3.5/35b-a3b/data/v1.1_35b_sft.jsonl`)
 - Loads from these filtered files (already 8K token-filtered by `filter_for_v12_pruned.py`):
   - `competitive_programming_converted.jsonl` → sample 2,000 rows
   - `qwen3_coder_distill_converted.jsonl` → sample 1,500 rows
   - `magicoder_filtered.jsonl` → sample 1,000 rows
   - `code_feedback_filtered.jsonl` → sample 500 rows
-- Falls back to `v1.2/data/` (unfiltered) if filtered files don't exist
+- Falls back to `qwen3.5/v1.1/data/` (unfiltered) if filtered files don't exist
 - Validates each row has `messages` with at least one assistant turn
 - Shuffles with seed=42
 - Writes single JSONL output
@@ -159,8 +159,8 @@ A script that:
 The structure should follow the same patterns as `build_training_mix.py` — `load_jsonl()`, `validate_row()`, argparse CLI, seed-based shuffle.
 
 **Steps:**
-- [ ] Implement `v1.2/scripts/build_35b_subset.py` following the spec above
-- [ ] Run `python v1.2/scripts/build_35b_subset.py --dry-run` to verify it finds files (or reports MISSING gracefully)
+- [ ] Implement `qwen3.5/35b-a3b/scripts/build_35b_subset.py` following the spec above
+- [ ] Run `python qwen3.5/35b-a3b/scripts/build_35b_subset.py --dry-run` to verify it finds files (or reports MISSING gracefully)
 - [ ] Commit with message: `Add build_35b_subset.py: curate 5K coding-heavy dataset for 35B-A3B fine-tune`
 
 **Acceptance criteria:**
@@ -171,15 +171,15 @@ The structure should follow the same patterns as `build_training_mix.py` — `lo
 
 ---
 
-### Task 2: Create `v1.2/scripts/train_35b_a3b.py` — SFT Training Script for MoE Model
+### Task 2: Create `qwen3.5/35b-a3b/scripts/train_35b_a3b.py` — SFT Training Script for MoE Model
 
 **Context:**
-This is the main training script for DeltaCoder 35B-A3B. It's modeled on `v1.2/scripts/train_unsloth.py` (the 9B script) but adapted for the MoE architecture. The key differences are: (1) use `FastLanguageModel` instead of `FastVisionModel`, (2) include `gate_up_proj` in LoRA targets, (3) disable packing, (4) set `fast_inference=False`, (5) set default context to 8192 instead of 32768, (6) no VLM packing hack needed.
+This is the main training script for DeltaCoder 35B-A3B. It's modeled on `qwen3.5/v1.1/scripts/train_unsloth.py` (the 9B script) but adapted for the MoE architecture. The key differences are: (1) use `FastLanguageModel` instead of `FastVisionModel`, (2) include `gate_up_proj` in LoRA targets, (3) disable packing, (4) set `fast_inference=False`, (5) set default context to 8192 instead of 32768, (6) no VLM packing hack needed.
 
 The script loads raw JSONL data (not pre-tokenized parquet — dataset is only 5K rows so tokenization is instant), applies the Qwen3.5 chat template, and trains with `train_on_responses_only=True`.
 
 **Files:**
-- Create: `v1.2/scripts/train_35b_a3b.py`
+- Create: `qwen3.5/35b-a3b/scripts/train_35b_a3b.py`
 
 **What to implement:**
 A training script with these specifics:
@@ -189,7 +189,7 @@ BASE_MODEL = "unsloth/Qwen3.5-35B-A3B"  # or "Qwen/Qwen3.5-35B-A3B"
 MAX_SEQ_LENGTH = 8192
 LORA_R = 64
 LORA_ALPHA = 64
-OUTPUT_DIR = "./outputs/deltacoder-35b-a3b-v1.2"
+OUTPUT_DIR = "./outputs/deltacoder-35b-a3b-v1.1"
 
 # Default: matches official Unsloth MoE notebook (validated)
 LORA_TARGET_MODULES = [
@@ -280,8 +280,8 @@ The script should include the same `normalize_messages()` and `build_text_datase
 Use `FastLanguageModel.for_training(model)` before creating the trainer.
 
 **Steps:**
-- [ ] Implement `v1.2/scripts/train_35b_a3b.py` following the spec above
-- [ ] Verify it imports cleanly: `python -c "import ast; ast.parse(open('v1.2/scripts/train_35b_a3b.py').read()); print('OK')"`
+- [ ] Implement `qwen3.5/35b-a3b/scripts/train_35b_a3b.py` following the spec above
+- [ ] Verify it imports cleanly: `python -c "import ast; ast.parse(open('qwen3.5/35b-a3b/scripts/train_35b_a3b.py').read()); print('OK')"`
 - [ ] Commit with message: `Add train_35b_a3b.py: SFT training script for Qwen3.5-35B-A3B MoE`
 
 **Acceptance criteria:**
@@ -298,10 +298,10 @@ Use `FastLanguageModel.for_training(model)` before creating the trainer.
 
 ---
 
-### Task 3: Create `v1.2/scripts/provision_35b.sh` — Vast.ai Bootstrap for 35B-A3B
+### Task 3: Create `qwen3.5/35b-a3b/scripts/provision.sh` — Vast.ai Bootstrap for 35B-A3B
 
 **Context:**
-This is the Vast.ai provisioning script for the 35B-A3B fine-tune. It's based on `v1.2/scripts/provision.sh` (the 9B version) but adapted for the 35B-A3B model. The key differences: (1) downloads `train_35b_a3b.py` instead of `train_unsloth.py`, (2) NO VLM packing patch needed, (3) pre-downloads `Qwen/Qwen3.5-35B-A3B` tokenizer/config (NOT `Qwen/Qwen3.5-9B`), (4) also downloads `build_35b_subset.py` so we can build the training data on-instance.
+This is the Vast.ai provisioning script for the 35B-A3B fine-tune. It's based on `qwen3.5/v1.1/scripts/provision.sh` (the 9B version) but adapted for the 35B-A3B model. The key differences: (1) downloads `train_35b_a3b.py` instead of `train_unsloth.py`, (2) NO VLM packing patch needed, (3) pre-downloads `Qwen/Qwen3.5-35B-A3B` tokenizer/config (NOT `Qwen/Qwen3.5-9B`), (4) also downloads `build_35b_subset.py` so we can build the training data on-instance.
 
 The script should be almost identical to `provision.sh` but with these changes. It still needs: venv, unsloth, flash-linear-attention, causal-conv1d (GDN layers exist in 35B-A3B too), GPU arch detection.
 
@@ -310,12 +310,12 @@ The script should be almost identical to `provision.sh` but with these changes. 
 Also add a verification step for `transformers>=5.0` (required for Qwen3.5).
 
 **Files:**
-- Create: `v1.2/scripts/provision_35b.sh`
+- Create: `qwen3.5/35b-a3b/scripts/provision.sh`
 
 **What to implement:**
-Copy the structure of `v1.2/scripts/provision.sh` line-by-line, with these changes:
+Copy the structure of `qwen3.5/v1.1/scripts/provision.sh` line-by-line, with these changes:
 
-1. Header comment: "DeltaCoder v1.2 — 35B-A3B Vast.ai Provisioning Script"
+1. Header comment: "DeltaCoder Qwen3.5 v1.1 — 35B-A3B Vast.ai Provisioning Script"
 2. Script downloads section — download these scripts:
    - `train_35b_a3b.py` (instead of `train_unsloth.py`)
    - `build_35b_subset.py` (for building training data on-instance)
@@ -331,9 +331,9 @@ Copy the structure of `v1.2/scripts/provision.sh` line-by-line, with these chang
 Everything else stays the same: venv creation, unsloth install, flash-linear-attention, causal-conv1d build with detected arch patching, verification checks.
 
 **Steps:**
-- [ ] Implement `v1.2/scripts/provision_35b.sh` following the spec above
-- [ ] Verify it's valid bash: `bash -n v1.2/scripts/provision_35b.sh`
-- [ ] Commit with message: `Add provision_35b.sh: Vast.ai bootstrap for 35B-A3B fine-tune`
+- [ ] Implement `qwen3.5/35b-a3b/scripts/provision.sh` following the spec above
+- [ ] Verify it's valid bash: `bash -n qwen3.5/35b-a3b/scripts/provision.sh`
+- [ ] Commit with message: `Add provision.sh: Vast.ai bootstrap for 35B-A3B fine-tune`
 
 **Acceptance criteria:**
 - [ ] Script passes `bash -n` (no syntax errors)
@@ -345,7 +345,7 @@ Everything else stays the same: venv creation, unsloth install, flash-linear-att
 
 ---
 
-### Task 4: Create `v1.2/scripts/merge_and_export_35b.py` — Merge LoRA + GGUF Export for MoE
+### Task 4: Create `qwen3.5/35b-a3b/scripts/merge_and_export.py` — Merge LoRA + GGUF Export for MoE
 
 **Context:**
 Unsloth's `save_pretrained_gguf` is broken for MoE models (bug #4294). This script handles the manual merge + GGUF conversion using llama.cpp directly. Unlike the 9B version (`merge_and_export_dpo.py`) which does a two-stage merge (SFT + DPO), this script only does a single merge (SFT LoRA → merged) since we're not doing DPO for the 35B-A3B initially.
@@ -353,15 +353,15 @@ Unsloth's `save_pretrained_gguf` is broken for MoE models (bug #4294). This scri
 If training used `--save-merged`, the merged model already exists and we skip straight to GGUF conversion. Otherwise, we merge the LoRA adapter first using PEFT.
 
 **Files:**
-- Create: `v1.2/scripts/merge_and_export_35b.py`
+- Create: `qwen3.5/35b-a3b/scripts/merge_and_export.py`
 
 **What to implement:**
 A script with:
-- `--adapter-dir` (LoRA adapter directory, default: `./outputs/deltacoder-35b-a3b-v1.2`)
-- `--merged-dir` (where to save merged model, default: `./outputs/deltacoder-35b-a3b-v1.2-merged`)
-- `--gguf-dir` (where to save GGUFs, default: `./outputs/deltacoder-35b-a3b-v1.2-gguf`)
+- `--adapter-dir` (LoRA adapter directory, default: `./outputs/deltacoder-35b-a3b-v1.1`)
+- `--merged-dir` (where to save merged model, default: `./outputs/deltacoder-35b-a3b-v1.1-merged`)
+- `--gguf-dir` (where to save GGUFs, default: `./outputs/deltacoder-35b-a3b-v1.1-gguf`)
 - `--llama-cpp-dir` (path to llama.cpp, default: `/workspace/llama.cpp`)
-- `--filename-prefix` (default: `DeltaCoder-35B-A3B-v1.2`)
+- `--filename-prefix` (default: `DeltaCoder-35B-A3B-v1.1`)
 - `--skip-merge` flag (if merged model already exists from `--save-merged` in training)
 - `--upload` flag + `--hf-token` for HuggingFace upload
 - `--keep-merged` flag to keep the merged bf16 model (otherwise deleted to save disk)
@@ -399,9 +399,9 @@ Quant list (same as 9B): Q2_K, Q3_K_S, Q3_K_M, Q3_K_L, Q4_0, Q4_K_S, Q4_K_M, Q5_
 Upload (if `--upload`): Use `huggingface_hub.HfApi().upload_file()` to `danielcherubini/Qwen3.5-DeltaCoder-35B-A3B-GGUF`.
 
 **Steps:**
-- [ ] Implement `v1.2/scripts/merge_and_export_35b.py` following the spec above
-- [ ] Verify it imports cleanly: `python -c "import ast; ast.parse(open('v1.2/scripts/merge_and_export_35b.py').read()); print('OK')"`
-- [ ] Commit with message: `Add merge_and_export_35b.py: merge LoRA + GGUF export for 35B-A3B MoE`
+- [ ] Implement `qwen3.5/35b-a3b/scripts/merge_and_export.py` following the spec above
+- [ ] Verify it imports cleanly: `python -c "import ast; ast.parse(open('qwen3.5/35b-a3b/scripts/merge_and_export.py').read()); print('OK')"`
+- [ ] Commit with message: `Add merge_and_export.py: merge LoRA + GGUF export for 35B-A3B MoE`
 
 **Acceptance criteria:**
 - [ ] Script parses without syntax errors
@@ -432,21 +432,21 @@ Add a new section `## 13. DeltaCoder 35B-A3B (Qwen3.5-35B-A3B MoE)` after the ex
    - `fast_inference=False` required (not supported for MoE)
    - Triton kernel needs 131072 bytes shared memory — may fail on some GPUs (need 80GB class)
 4. **Quick commands**:
-   ```bash
-   # Build 5K subset
-   python v1.2/scripts/build_35b_subset.py --data-dir v1.2/data/v1.2_pruned --output v1.2/data/v1.2_35b_sft.jsonl
+    ```bash
+    # Build 5K subset
+    python qwen3.5/35b-a3b/scripts/build_35b_subset.py --data-dir qwen3.5/v1.1/data/v1.1_pruned --output qwen3.5/35b-a3b/data/v1.1_35b_sft.jsonl
 
-   # Dry run (20 steps)
-   python v1.2/scripts/train_35b_a3b.py --data v1.2/data/v1.2_35b_sft.jsonl --max-steps 20
+    # Dry run (20 steps)
+    python qwen3.5/35b-a3b/scripts/train_35b_a3b.py --data qwen3.5/35b-a3b/data/v1.1_35b_sft.jsonl --max-steps 20
 
-   # Full training
-   python v1.2/scripts/train_35b_a3b.py --data v1.2/data/v1.2_35b_sft.jsonl --save-merged
+    # Full training
+    python qwen3.5/35b-a3b/scripts/train_35b_a3b.py --data qwen3.5/35b-a3b/data/v1.1_35b_sft.jsonl --save-merged
 
-   # GGUF export
-   python v1.2/scripts/merge_and_export_35b.py --skip-merge --merged-dir ./outputs/deltacoder-35b-a3b-v1.2-merged
-   ```
+    # GGUF export
+    python qwen3.5/35b-a3b/scripts/merge_and_export.py --skip-merge --merged-dir ./outputs/deltacoder-35b-a3b-v1.1-merged
+    ```
 
-Also update the **Key Scripts** table (section 6) to add the four new scripts.
+Also update the **Key Scripts** table (section 6) to add the four new scripts (`qwen3.5/35b-a3b/scripts/build_35b_subset.py`, `qwen3.5/35b-a3b/scripts/train_35b_a3b.py`, `qwen3.5/35b-a3b/scripts/provision.sh`, `qwen3.5/35b-a3b/scripts/merge_and_export.py`).
 
 Also update **HuggingFace Repos** (section 8) to add:
 - `danielcherubini/Qwen3.5-DeltaCoder-35B-A3B` — 35B-A3B adapter
@@ -470,8 +470,8 @@ Also update **HuggingFace Repos** (section 8) to add:
 ### On local machine (before GPU rental):
 1. Task 1: `build_35b_subset.py` — curate 5K subset
 2. Task 2: `train_35b_a3b.py` — training script
-3. Task 3: `provision_35b.sh` — provisioning script
-4. Task 4: `merge_and_export_35b.py` — merge + GGUF
+3. Task 3: `provision.sh` — provisioning script
+4. Task 4: `merge_and_export.py` — merge + GGUF
 5. Task 5: Update AGENTS.md
 6. Push to GitHub
 
@@ -481,23 +481,23 @@ Also update **HuggingFace Repos** (section 8) to add:
 # Model cache (70GB) + merged model (70GB) + GGUF bf16 (70GB) = 210GB peak
 
 # 1. Bootstrap (~10 min — includes llama.cpp build)
-curl -fsSL -o /workspace/provision_35b.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/provision_35b.sh
-bash /workspace/provision_35b.sh
+curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/qwen3.5/35b-a3b/scripts/provision.sh
+bash /workspace/provision.sh
 
 # 2. Upload data (~1 min)
 # From local: scp the existing preprocessed data
-scp -P <PORT> v1.2/data/competitive_programming_converted.jsonl root@<IP>:/workspace/data/
-scp -P <PORT> v1.2/data/qwen3_coder_distill_converted.jsonl root@<IP>:/workspace/data/
-scp -P <PORT> v1.2/data/v1.2_pruned/magicoder_filtered.jsonl root@<IP>:/workspace/data/
-scp -P <PORT> v1.2/data/v1.2_pruned/code_feedback_filtered.jsonl root@<IP>:/workspace/data/
+scp -P <PORT> qwen3.5/v1.1/data/competitive_programming_converted.jsonl root@<IP>:/workspace/data/
+scp -P <PORT> qwen3.5/v1.1/data/qwen3_coder_distill_converted.jsonl root@<IP>:/workspace/data/
+scp -P <PORT> qwen3.5/v1.1/data/v1.1_pruned/magicoder_filtered.jsonl root@<IP>:/workspace/data/
+scp -P <PORT> qwen3.5/v1.1/data/v1.1_pruned/code_feedback_filtered.jsonl root@<IP>:/workspace/data/
 
 # 3. Build subset (seconds)
 source /workspace/venv/bin/activate
-python /workspace/build_35b_subset.py --data-dir /workspace/data --output /workspace/v1.2_35b_sft.jsonl
+python /workspace/build_35b_subset.py --data-dir /workspace/data --output /workspace/v1.1_35b_sft.jsonl
 
 # 4. Dry run (20 steps, ~10 min)
 nohup python /workspace/train_35b_a3b.py \
-    --data /workspace/v1.2_35b_sft.jsonl \
+    --data /workspace/v1.1_35b_sft.jsonl \
     --max-steps 20 \
     --output-dir /workspace/outputs/35b-dryrun \
     > /workspace/35b_dryrun.log 2>&1 &
@@ -505,17 +505,17 @@ tail -f /workspace/35b_dryrun.log
 
 # 5. Full training (~10-14 hrs)
 nohup python /workspace/train_35b_a3b.py \
-    --data /workspace/v1.2_35b_sft.jsonl \
+    --data /workspace/v1.1_35b_sft.jsonl \
     --save-merged \
-    --output-dir /workspace/outputs/deltacoder-35b-a3b-v1.2 \
+    --output-dir /workspace/outputs/deltacoder-35b-a3b-v1.1 \
     > /workspace/35b_train.log 2>&1 &
 tail -f /workspace/35b_train.log
 
 # 6. GGUF export (~30 min)
-python /workspace/merge_and_export_35b.py \
+python /workspace/merge_and_export.py \
     --skip-merge \
-    --merged-dir /workspace/outputs/deltacoder-35b-a3b-v1.2-merged \
-    --gguf-dir /workspace/outputs/deltacoder-35b-a3b-v1.2-gguf \
+    --merged-dir /workspace/outputs/deltacoder-35b-a3b-v1.1-merged \
+    --gguf-dir /workspace/outputs/deltacoder-35b-a3b-v1.1-gguf \
     --llama-cpp-dir /workspace/llama.cpp \
     --upload --hf-token $HF_TOKEN
 ```
