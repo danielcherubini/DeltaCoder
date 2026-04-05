@@ -1,4 +1,4 @@
-# DeltaCoder v1.1-DPO — Hyperparameter Reference
+# DeltaCoder v1.0-DPO — Hyperparameter Reference
 # This file documents the DPO training configuration.
 # The actual hyperparameters live in scripts/train_dpo.py.
 

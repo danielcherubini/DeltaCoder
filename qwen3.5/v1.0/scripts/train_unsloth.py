@@ -1,5 +1,5 @@
 """
-Qwen3.5-DeltaCoder-9B v1.2 — Unsloth LoRA SFT training script.
+Qwen3.5-DeltaCoder-9B Qwen3.5 v1.0 — Unsloth LoRA SFT training script.
 Loads preprocessed JSONL from local disk, uses Unsloth's VLM SFT pipeline.
 
 Qwen3.5 is a unified VLM — must use FastVisionModel + UnslothVisionDataCollator.
@@ -26,17 +26,17 @@ import copy
 # ---------- Config ----------
 MODEL_NAME = "Qwen/Qwen3.5-9B"
 MAX_SEQ_LENGTH = 2048
-OUTPUT_DIR = "./outputs/deltacoder-9b-v1.2"
+OUTPUT_DIR = "./outputs/deltacoder-9b-v1.0"
 LORA_R = 64
 LORA_ALPHA = 32
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="DeltaCoder v1.2 SFT training")
+    parser = argparse.ArgumentParser(description="DeltaCoder Qwen3.5 v1.0 SFT training")
     parser.add_argument(
         "--dataset",
         type=str,
-        default="data/v1.2_sft_train.jsonl",
+        default="data/v1.0_sft_train.jsonl",
         help="Path to preprocessed training JSONL",
     )
     parser.add_argument(
