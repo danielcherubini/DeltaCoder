@@ -1,5 +1,5 @@
 """
-Pre-tokenize v1.3 training data for SFTTrainer with packing.
+Pre-tokenize Qwen3.6 v1.0 training data for SFTTrainer with packing.
 
 Applies the chat template and tokenizes all rows, saving the result
 as a parquet file on disk. The training script loads this directly, skipping
@@ -9,7 +9,7 @@ Output dataset has columns: input_ids, attention_mask, labels
 SFTTrainer with packing=True detects these and skips its own tokenization.
 
 Usage:
-    python pretokenize_for_sft.py --data /workspace/v1.3_sft_train.jsonl --output /workspace/v1.3_pretokenized.parquet --max-seq-length 32768
+    python pretokenize_for_sft.py --data /workspace/v1.0_sft_train.jsonl --output /workspace/v1.0_pretokenized.parquet --max-seq-length 32768
 """
 
 import argparse

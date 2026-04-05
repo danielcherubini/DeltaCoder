@@ -6,9 +6,9 @@ from pathlib import Path
 from huggingface_hub import HfApi
 
 HF_TOKEN = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("HF_TOKEN")
-GGUF_DIR = Path("D:/AI/DeltaCoder/v1.3/gguf")
-MERGED_DIR = Path("D:/AI/DeltaCoder/v1.3/merged_fixed")
-# TODO: Create these repos on HuggingFace when v1.3 is ready
+GGUF_DIR = Path("D:/AI/DeltaCoder/qwen3.6/v1.0/gguf")
+MERGED_DIR = Path("D:/AI/DeltaCoder/qwen3.6/v1.0/merged_fixed")
+# TODO: Create these repos on HuggingFace when Qwen3.6 v1.0 is ready
 GGUF_REPO = "danielcherubini/Qwen3.6-DeltaCoder-9B-GGUF"
 MODEL_REPO = "danielcherubini/Qwen3.6-DeltaCoder-9B"
 

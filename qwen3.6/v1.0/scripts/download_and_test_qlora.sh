@@ -28,7 +28,7 @@ echo "Model download complete."
 echo ""
 echo "=== Step 2: Run QLoRA dry run (20 steps) ==="
 python3 /workspace/train_unsloth.py \
-    --data /workspace/v1.3_pretokenized_pruned.parquet \
+    --data /workspace/v1.0_pretokenized_pruned.parquet \
     --max-steps 20 \
     --qlora \
     --logging-steps 1

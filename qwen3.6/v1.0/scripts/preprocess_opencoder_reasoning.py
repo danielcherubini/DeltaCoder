@@ -1,5 +1,5 @@
 """
-Preprocess nvidia/OpenCodeReasoning for DeltaCoder v1.2 SFT.
+Preprocess nvidia/OpenCodeReasoning for DeltaCoder Qwen3.6 v1.0 SFT.
 
 Input: nvidia/OpenCodeReasoning split_0 (567K rows, competitive coding with R1 reasoning)
 Output: data/opencoder_reasoning_converted.jsonl

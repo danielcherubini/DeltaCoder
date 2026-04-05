@@ -1,5 +1,5 @@
 """
-Qwen3.6-DeltaCoder-9B — DPO training script (v1.3).
+Qwen3.6-DeltaCoder-9B — DPO training script (Qwen3.6 v1.0).
 Uses standard HuggingFace + PEFT + TRL (no Unsloth) to avoid vision model
 detection issues.
 
@@ -8,13 +8,13 @@ Pass --sft-model to point to the merged SFT weights (or the raw base + --sft-ada
 
 Usage:
     # Quick test (50 steps, verify loss moves before full run):
-    python scripts/train_dpo.py --sft-model /workspace/merged_v1.3 --max-steps 50
+    python scripts/train_dpo.py --sft-model /workspace/merged_qwen3.6-v1.0 --max-steps 50
 
     # Full training:
-    python scripts/train_dpo.py --sft-model /workspace/merged_v1.3
+    python scripts/train_dpo.py --sft-model /workspace/merged_qwen3.6-v1.0
 
     # Full training + Ling-Coder-DPO mix (253K coding preference pairs):
-    python scripts/train_dpo.py --sft-model /workspace/merged_v1.3 --ling-coder 50000
+    python scripts/train_dpo.py --sft-model /workspace/merged_qwen3.6-v1.0 --ling-coder 50000
 """
 
 import argparse
@@ -54,7 +54,9 @@ LORA_TARGET_MODULES = [
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="DPO training for DeltaCoder v1.3")
+    parser = argparse.ArgumentParser(
+        description="DPO training for DeltaCoder Qwen3.6 v1.0"
+    )
     parser.add_argument(
         "--sft-model",
         type=str,
@@ -76,13 +78,13 @@ def parse_args():
     parser.add_argument(
         "--data",
         type=str,
-        default="data/dpo_pairs_v1.3.jsonl",
+        default="data/dpo_pairs_v1.0.jsonl",
         help="Path to DPO pairs JSONL in conversational format",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./outputs/deltacoder-9b-v1.3-dpo",
+        default="./outputs/deltacoder-9b-qwen3.6-v1.0-dpo",
         help="Output directory for checkpoints and final adapter",
     )
     parser.add_argument(

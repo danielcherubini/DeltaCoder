@@ -1,5 +1,5 @@
 """
-Build the DeltaCoder v1.3 training mix from preprocessed dataset files.
+Build the DeltaCoder Qwen3.6 v1.0 training mix from preprocessed dataset files.
 
 Combines all preprocessed JSONL files into a single shuffled training file.
 Each source is capped to its target row count.
@@ -95,15 +95,17 @@ def validate_row(row: dict) -> bool:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build DeltaCoder v1.3 training mix")
+    parser = argparse.ArgumentParser(
+        description="Build DeltaCoder Qwen3.6 v1.0 training mix"
+    )
     parser.add_argument(
         "--data-dir",
-        default="v1.3/data/v1.3_pruned",
+        default="qwen3.6/v1.0/data/v1.0_pruned",
         help="Directory containing preprocessed JSONL files",
     )
     parser.add_argument(
         "--output",
-        default="v1.3/data/v1.3_sft_train_pruned.jsonl",
+        default="qwen3.6/v1.0/data/v1.0_sft_train_pruned.jsonl",
         help="Output training JSONL",
     )
     parser.add_argument(
@@ -124,8 +126,8 @@ def main():
     # Select source list and data directory based on mode
     if args.use_unfiltered:
         sources = SOURCES_UNFILTERED
-        data_dir = Path("v1.3/data")
-        output_path = Path("v1.3/data/v1.3_sft_train.jsonl")
+        data_dir = Path("qwen3.6/v1.0/data")
+        output_path = Path("qwen3.6/v1.0/data/v1.0_sft_train.jsonl")
         print("MODE: Unfiltered (original 262K mix)")
     else:
         sources = SOURCES_PRUNED

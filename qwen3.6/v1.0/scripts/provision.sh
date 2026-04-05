@@ -1,9 +1,9 @@
 #!/bin/bash
-# DeltaCoder v1.3 — Vast.ai Provisioning Script
+# DeltaCoder Qwen3.6 v1.0 — Vast.ai Provisioning Script
 #
 # Auto-installs Unsloth + GDN acceleration + VLM packing patch on boot.
 # Download and run manually after SSH:
-#   curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.3/scripts/provision.sh
+#   curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/qwen3.6/v1.0/scripts/provision.sh
 #   bash /workspace/provision.sh
 #
 # Expects: vastai/pytorch image with matching CUDA toolkit (e.g. vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312-2026-03-26)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 LOG="/workspace/provision.log"
-echo "=== DeltaCoder v1.3 Provisioning ===" | tee "$LOG"
+echo "=== DeltaCoder Qwen3.6 v1.0 Provisioning ===" | tee "$LOG"
 echo "Started: $(date)" | tee -a "$LOG"
 
 # ---------- HF cache on workspace (not root disk!) ----------
@@ -140,8 +140,8 @@ uv pip install "$CONV1D_DIR" --no-build-isolation 2>&1 | tee -a "$LOG"
 REPO_RAW="https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main"
 echo "Downloading scripts from GitHub..." | tee -a "$LOG"
 
-curl -fsSL -o /workspace/patch_vlm_packing.py "$REPO_RAW/v1.3/scripts/patch_vlm_packing.py" 2>&1 | tee -a "$LOG"
-curl -fsSL -o /workspace/train_unsloth.py "$REPO_RAW/v1.3/scripts/train_unsloth.py" 2>&1 | tee -a "$LOG"
+curl -fsSL -o /workspace/patch_vlm_packing.py "$REPO_RAW/qwen3.6/v1.0/scripts/patch_vlm_packing.py" 2>&1 | tee -a "$LOG"
+curl -fsSL -o /workspace/train_unsloth.py "$REPO_RAW/qwen3.6/v1.0/scripts/train_unsloth.py" 2>&1 | tee -a "$LOG"
 
 echo "  Downloaded patch_vlm_packing.py and train_unsloth.py" | tee -a "$LOG"
 

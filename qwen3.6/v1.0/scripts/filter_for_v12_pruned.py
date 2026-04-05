@@ -1,5 +1,5 @@
 """
-Filter existing preprocessed datasets for the pruned v1.3 training mix.
+Filter existing preprocessed datasets for the pruned Qwen3.6 v1.0 training mix.
 
 Reads the existing *_converted.jsonl files and applies quality + token-length filtering.
 
@@ -21,10 +21,10 @@ Tiered token limits (Jackrong-inspired, 2026-04-05):
 
 Token estimation: chars / 3.5 (conservative for English code/text mix).
 
-Outputs filtered files to data/v1.3_pruned/ directory.
+Outputs filtered files to data/v1.0_pruned/ directory.
 
 Usage:
-    python filter_for_v12_pruned.py [--data-dir v1.3/data] [--output-dir v1.3/data/v1.3_pruned]
+    python filter_for_v12_pruned.py [--data-dir qwen3.6/v1.0/data] [--output-dir qwen3.6/v1.0/data/v1.0_pruned]
 """
 
 import argparse
@@ -265,10 +265,14 @@ def copy_xlam(data_dir: str, output_dir: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Filter datasets for pruned v1.3 mix")
-    parser.add_argument("--data-dir", default="v1.3/data", help="Input data directory")
+    parser = argparse.ArgumentParser(
+        description="Filter datasets for pruned Qwen3.6 v1.0 mix"
+    )
     parser.add_argument(
-        "--output-dir", default="v1.3/data/v1.3_pruned", help="Output directory"
+        "--data-dir", default="qwen3.6/v1.0/data", help="Input data directory"
+    )
+    parser.add_argument(
+        "--output-dir", default="qwen3.6/v1.0/data/v1.0_pruned", help="Output directory"
     )
     args = parser.parse_args()
 

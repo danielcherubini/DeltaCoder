@@ -1,5 +1,5 @@
 """
-DeltaCoder v1.3 — Merge LoRA adapters + export to GGUF.
+DeltaCoder Qwen3.6 v1.0 — Merge LoRA adapters + export to GGUF.
 
 Two-stage merge:
   1. Qwen/Qwen3.6-9B + SFT LoRA -> merged SFT (or use pre-merged SFT model)
@@ -9,16 +9,16 @@ Two-stage merge:
   5. Upload to HuggingFace (optional)
 
 Usage:
-    # v1.3 — pre-merged SFT model:
-    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.3 \
-        --filename-prefix DeltaCoder-9B-v1.3-DPO
+    # Qwen3.6 v1.0 — pre-merged SFT model:
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_qwen3.6-v1.0 \
+        --filename-prefix DeltaCoder-9B-Qwen3.6-v1.0-DPO
 
     # Full pipeline with upload:
-    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.3 \
-        --dpo-adapter ./outputs/deltacoder-9b-v1.3-dpo/lora_adapter \
-        --merged-dir ./outputs/deltacoder-9b-v1.3-merged \
-        --gguf-dir ./outputs/deltacoder-9b-v1.3-gguf \
-        --filename-prefix DeltaCoder-9B-v1.3-DPO \
+    python scripts/merge_and_export_dpo.py --sft-model /workspace/merged_qwen3.6-v1.0 \
+        --dpo-adapter ./outputs/deltacoder-9b-qwen3.6-v1.0-dpo/lora_adapter \
+        --merged-dir ./outputs/deltacoder-9b-qwen3.6-v1.0-merged \
+        --gguf-dir ./outputs/deltacoder-9b-qwen3.6-v1.0-gguf \
+        --filename-prefix DeltaCoder-9B-Qwen3.6-v1.0-DPO \
         --llama-cpp-dir /workspace/llama.cpp \
         --keep-merged --upload --hf-token $HF_TOKEN
 """
@@ -35,7 +35,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 SANITY_PROMPT = "Write a Python function that reverses a list."
-FILENAME_PREFIX_DEFAULT = "DeltaCoder-9B-v1.3-DPO"
+FILENAME_PREFIX_DEFAULT = "DeltaCoder-9B-Qwen3.6-v1.0-DPO"
 QUANTS = [
     "Q2_K",
     "Q3_K_S",
@@ -51,7 +51,7 @@ QUANTS = [
     "Q8_0",  # 8-bit
     "BF16",  # 16-bit
 ]
-# TODO: Create these repos on HuggingFace when v1.3 is ready
+# TODO: Create these repos on HuggingFace when Qwen3.6 v1.0 is ready
 HF_GGUF_REPO = "danielcherubini/Qwen3.6-DeltaCoder-9B-GGUF"
 HF_ADAPTER_REPO = "danielcherubini/Qwen3.6-DeltaCoder-9B"
 
@@ -73,25 +73,25 @@ def parse_args():
     parser.add_argument(
         "--sft-adapter",
         type=str,
-        default="./outputs/deltacoder-9b-v1.3",
-        help="v1.3 SFT LoRA adapter (used if --sft-model not set)",
+        default="./outputs/deltacoder-9b-qwen3.6-v1.0",
+        help="Qwen3.6 v1.0 SFT LoRA adapter (used if --sft-model not set)",
     )
     parser.add_argument(
         "--dpo-adapter",
         type=str,
-        default="./outputs/deltacoder-9b-v1.3-dpo/lora_adapter",
+        default="./outputs/deltacoder-9b-qwen3.6-v1.0-dpo/lora_adapter",
         help="DPO LoRA adapter (local path)",
     )
     parser.add_argument(
         "--merged-dir",
         type=str,
-        default="./outputs/deltacoder-9b-v1.3-dpo-merged",
+        default="./outputs/deltacoder-9b-qwen3.6-v1.0-dpo-merged",
         help="Output directory for merged bf16 model",
     )
     parser.add_argument(
         "--gguf-dir",
         type=str,
-        default="./outputs/deltacoder-9b-v1.3-dpo-gguf",
+        default="./outputs/deltacoder-9b-qwen3.6-v1.0-dpo-gguf",
         help="Output directory for GGUF files",
     )
     parser.add_argument(
@@ -104,7 +104,7 @@ def parse_args():
         "--filename-prefix",
         type=str,
         default=FILENAME_PREFIX_DEFAULT,
-        help="Prefix for GGUF filenames (e.g. DeltaCoder-9B-v1.3-DPO)",
+        help="Prefix for GGUF filenames (e.g. DeltaCoder-9B-Qwen3.6-v1.0-DPO)",
     )
     parser.add_argument(
         "--keep-merged",

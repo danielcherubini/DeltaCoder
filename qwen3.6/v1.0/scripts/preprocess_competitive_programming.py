@@ -1,5 +1,5 @@
 """
-Download and preprocess Jackrong/Competitive-Programming-python-blend for DeltaCoder v1.3.
+Download and preprocess Jackrong/Competitive-Programming-python-blend for DeltaCoder Qwen3.6 v1.0.
 
 Dataset is already in messages format with <think> blocks — minimal processing needed.
 Just adds source tag and applies an 8K token length filter.
@@ -9,7 +9,7 @@ Dataset card: ~28K rows, apache-2.0/cc-by-4.0 licensed.
 Already contains <think>...</think> in assistant responses.
 
 Usage:
-    python preprocess_competitive_programming.py [--output-dir v1.3/data]
+    python preprocess_competitive_programming.py [--output-dir qwen3.6/v1.0/data]
 """
 
 import argparse
@@ -37,10 +37,10 @@ def estimate_tokens(messages: list[dict]) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Preprocess Competitive-Programming-python-blend for v1.3"
+        description="Preprocess Competitive-Programming-python-blend for Qwen3.6 v1.0"
     )
     parser.add_argument(
-        "--output-dir", default="v1.3/data", help="Output directory for JSONL"
+        "--output-dir", default="qwen3.6/v1.0/data", help="Output directory for JSONL"
     )
     parser.add_argument(
         "--max-rows",

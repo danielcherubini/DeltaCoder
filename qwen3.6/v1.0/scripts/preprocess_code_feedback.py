@@ -1,5 +1,5 @@
 """
-Preprocess Code-Feedback for DeltaCoder v1.2 SFT.
+Preprocess Code-Feedback for DeltaCoder Qwen3.6 v1.0 SFT.
 
 Input: m-a-p/Code-Feedback (HuggingFace)
 Output: data/code_feedback_converted.jsonl

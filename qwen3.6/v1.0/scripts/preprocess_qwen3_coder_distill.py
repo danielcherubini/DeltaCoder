@@ -1,5 +1,5 @@
 """
-Download and preprocess Jackrong/qwen3-coder-480b-distill-mini for DeltaCoder v1.3.
+Download and preprocess Jackrong/qwen3-coder-480b-distill-mini for DeltaCoder Qwen3.6 v1.0.
 
 Converts from flat Input/code_output format to DeltaCoder messages format.
 Applies an 8K token length filter.
@@ -9,7 +9,7 @@ Distilled from Qwen3-Coder-480B-A35B-Instruct via rStar-Coder seeds.
 Format: {"Input": "...", "code_output": "...", "generator": "...", "category": "code"}
 
 Usage:
-    python preprocess_qwen3_coder_distill.py [--output-dir v1.3/data]
+    python preprocess_qwen3_coder_distill.py [--output-dir qwen3.6/v1.0/data]
 """
 
 import argparse
@@ -37,10 +37,10 @@ def estimate_tokens(messages: list[dict]) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Preprocess qwen3-coder-480b-distill-mini for v1.3"
+        description="Preprocess qwen3-coder-480b-distill-mini for Qwen3.6 v1.0"
     )
     parser.add_argument(
-        "--output-dir", default="v1.3/data", help="Output directory for JSONL"
+        "--output-dir", default="qwen3.6/v1.0/data", help="Output directory for JSONL"
     )
     parser.add_argument(
         "--max-rows",

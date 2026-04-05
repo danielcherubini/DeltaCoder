@@ -1,4 +1,4 @@
-"""Generate DPO preference pairs by running DeltaCoder v1.3 against AceCode-V2-122K problems.
+"""Generate DPO preference pairs by running DeltaCoder Qwen3.6 v1.0 against AceCode-V2-122K problems.
 
 Downloads a configurable subset of AceCode-V2-122K from HuggingFace, shuffles and takes
 n-problems rows, then calls DeltaCoder API to generate n-samples completions per problem.
@@ -257,7 +257,7 @@ def main():
     )
     parser.add_argument("--model", type=str, default="deltacoder", help="Model name")
     parser.add_argument(
-        "--output", type=str, default="data/dpo_pairs_v1.3.jsonl", help="Output file"
+        "--output", type=str, default="data/dpo_pairs_v1.0.jsonl", help="Output file"
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
