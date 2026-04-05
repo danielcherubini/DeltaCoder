@@ -8,16 +8,23 @@ Applies VLM packing unblock (from unslothai/unsloth#4160) to enable
 sample packing at 32K context. The NaN gradient issue only affects
 total tokens per batch >~64K; at batch_size=1 + 32K we're safe.
 
+Jackrong-inspired training approach (2026-04-05):
+  - train_on_responses_only=True (default): only compute loss on assistant responses,
+    prevents instruction memorisation
+  - lora_alpha=64 (1:1 with r=64): stronger LoRA influence, proven by Jackrong (+4.87pp HumanEval)
+  - Quality > quantity: tiered token-filtered dataset (~157K rows, ~700M tokens)
+
 Supports two data input modes:
   1. Raw JSONL (--data /path/to/v1.3_sft_train.jsonl) — tokenizes on-the-fly
-  2. Pre-tokenized parquet dir (--data /path/to/v1.3_pretokenized/) — skips tokenization
+  2. Pre-tokenized parquet (--data /path/to/v1.3_pretokenized.parquet) — skips tokenization
 
-Pre-tokenized mode is ~100x faster to start since all rows are already tokenized.
+Pre-tokenized mode is ~100x faster to start since rows are already tokenized.
 
 Usage:
-    python train_unsloth.py --data /workspace/v1.3_pretokenized
-    python train_unsloth.py --data /workspace/v1.3_pretokenized --max-steps 20  # dry run
+    python train_unsloth.py --data /workspace/v1.3_pretokenized.parquet
+    python train_unsloth.py --data /workspace/v1.3_pretokenized.parquet --max-steps 20  # dry run
     python train_unsloth.py --data /workspace/v1.3_sft_train.jsonl  # raw JSONL fallback
+    python train_unsloth.py --data /workspace/v1.3_pretokenized.parquet --no-response-only  # ablation
 """
 
 import argparse
@@ -61,7 +68,7 @@ from unsloth import FastVisionModel
 BASE_MODEL = "Qwen/Qwen3.6-9B"
 MAX_SEQ_LENGTH = 32768
 LORA_R = 64
-LORA_ALPHA = 32
+LORA_ALPHA = 64  # 1:1 ratio with r — Jackrong-validated setting (was 32)
 OUTPUT_DIR = "./outputs/deltacoder-9b-v1.3"
 
 # TODO: Verify LoRA target modules match Qwen3.6 architecture.
@@ -110,6 +117,11 @@ def parse_args():
         "--qlora",
         action="store_true",
         help="Use QLoRA (4-bit quantized base model) instead of bf16 LoRA",
+    )
+    parser.add_argument(
+        "--no-response-only",
+        action="store_true",
+        help="Disable train_on_responses_only — train on full sequence including user tokens (ablation)",
     )
     return parser.parse_args()
 
@@ -202,6 +214,7 @@ def main():
     print(f"Learning rate: {args.lr}")
     print(f"Max steps: {args.max_steps if args.max_steps > 0 else 'full epoch'}")
     print(f"QLoRA (4-bit): {args.qlora}")
+    print(f"Train on responses only: {not args.no_response_only}")
     print("=" * 60)
 
     # Load model with FastVisionModel (preserves full VLM including vision encoder)
@@ -341,6 +354,21 @@ def main():
         processing_class=actual_tokenizer,
         args=SFTConfig(**sft_config_kwargs),
     )
+
+    # Apply train_on_responses_only — masks user/system tokens so loss is only computed
+    # on assistant responses. Prevents instruction memorisation (Jackrong-validated approach).
+    # Uses Qwen chat template markers to identify assistant response boundaries.
+    # TODO: Verify instruction_part/response_part tokens match Qwen3.6 chat template.
+    if not args.no_response_only:
+        from unsloth.chat_templates import train_on_responses_only
+
+        print("\nApplying train_on_responses_only (masking user/system tokens)...")
+        trainer = train_on_responses_only(
+            trainer,
+            instruction_part="<|im_start|>user\n",
+            response_part="<|im_start|>assistant\n",
+        )
+        print("  Done — loss will only be computed on assistant responses")
 
     # Print trainable params
     model.print_trainable_parameters()

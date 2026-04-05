@@ -289,12 +289,20 @@ def main():
 | `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
 | `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
 | `v1.2/scripts/generate_dpo_pairs.py` | Generate on-policy DPO pairs via OpenAI-compatible API |
+| `v1.2/scripts/build_training_mix.py` | Build final JSONL training mix from filtered sources |
+| `v1.2/scripts/filter_for_v12_pruned.py` | Apply tiered 8K/16K token filters to each source |
+| `v1.2/scripts/preprocess_competitive_programming.py` | Download + convert Jackrong competitive programming dataset |
+| `v1.2/scripts/preprocess_qwen3_coder_distill.py` | Download + convert Jackrong Qwen3-Coder-480B distill dataset |
 | `v1.3/scripts/pretokenize_for_sft.py` | Pre-tokenize v1.3 data for Qwen3.6 (32768 context) |
 | `v1.3/scripts/train_unsloth.py` | v1.3 SFT training (adapted for Qwen3.6) |
 | `v1.3/scripts/provision.sh` | v1.3 Vast.ai bootstrap (adapted for Qwen3.6) |
 | `v1.3/scripts/train_dpo.py` | v1.3 DPO training (adapted for Qwen3.6) |
 | `v1.3/scripts/merge_and_export_dpo.py` | v1.3 merge LoRA + GGUF export |
 | `v1.3/scripts/generate_dpo_pairs.py` | v1.3 DPO pair generation |
+| `v1.3/scripts/build_training_mix.py` | v1.3 training mix builder |
+| `v1.3/scripts/filter_for_v12_pruned.py` | v1.3 tiered 8K/16K token filters |
+| `v1.3/scripts/preprocess_competitive_programming.py` | v1.3 competitive programming preprocessing |
+| `v1.3/scripts/preprocess_qwen3_coder_distill.py` | v1.3 Qwen3-Coder-480B distill preprocessing |
 
 ## 7. Training Monitoring
 
@@ -351,7 +359,60 @@ python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
     --keep-merged --upload --hf-token $HF_TOKEN
 ```
 
-## 11. Key Discoveries & Constraints
+## 11. Training Dataset & Strategy (Jackrong-Inspired, 2026-04-05)
+
+### Core Philosophy: Quality > Quantity
+
+After analyzing Jackrong's Qwopus3.5-9B-v3 (87.80% HumanEval vs our v1 regression to 50.6%),
+we revised the entire training approach. Key changes:
+- **`lora_alpha=64`** (1:1 ratio with r=64, was 0.5:1) — Jackrong-validated
+- **`train_on_responses_only=True`** — mask user/system tokens, loss only on assistant responses
+- **1 epoch** (157K rows is already 10x Jackrong's dataset size)
+- **Tiered token limits** instead of uniform truncation
+
+### New Dataset Mix (~157K rows, ~700M tokens)
+
+**Tier 1 — ≤8K tokens (Coding + Tool Calling):**
+| Source | Rows | Notes |
+|--------|------|-------|
+| nemotron_tool_calling | ~40,000 | Filtered by tool call count |
+| competitive_programming | ~28,000 | NEW — Jackrong blend, 87.5% Nemotron Python competitive coding |
+| nemotron_agentic | ~18,850 | All kept (99.1% naturally ≤8K) |
+| xlam | ~15,000 | All kept |
+| code_feedback | ~14,985 | Multi-turn ≥4 messages |
+| qwen3_coder_distill | ~9,500 | NEW — distilled from Qwen3-Coder-480B via rStar-Coder |
+| magicoder | ~5,000 | Top 5K by length |
+
+**Tier 2 — ≤16K tokens (Agentic/SWE):**
+| Source | Rows | Notes |
+|--------|------|-------|
+| opencoder_reasoning | ~16,025 | 64.1% of 25K survive 16K filter |
+| swesmith | ~9,780 | 48.9% of 20K survive 16K filter |
+
+**Dropped entirely:** `nemotron_swe` — 100% of rows exceed 16K (median 43K).
+
+### New Jackrong Datasets
+- **`Jackrong/Competitive-Programming-python-blend`**: ~28K rows, already in `messages` format
+  with `<think>` blocks, apache-2.0/cc-by-4.0. Proved to boost HumanEval by +4.87pp.
+- **`Jackrong/qwen3-coder-480b-distill-mini`**: 9,543 rows, distilled from Qwen3-Coder-480B.
+  Uses `Input`/`code_output` format — converted by `preprocess_qwen3_coder_distill.py`.
+
+### `train_on_responses_only` Implementation
+```python
+from unsloth.chat_templates import train_on_responses_only
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part="<|im_start|>user\n",
+    response_part="<|im_start|>assistant\n",
+)
+```
+Applied after `SFTTrainer(...)` creation, before `trainer.train()`.
+Use `--no-response-only` flag on `train_unsloth.py` to disable for ablation.
+
+### Cost Reduction
+~700M tokens vs old 1.4B = ~half the training steps → **~$100-130** (was ~$200-260).
+
+## 12. Key Discoveries & Constraints
 
 ### 32K context cross_entropy OOM (Axolotl path — NOT used)
 - The VL model (`Qwen3_5ForConditionalGeneration`) materializes full logits tensor

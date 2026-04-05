@@ -4,15 +4,24 @@ Build the DeltaCoder v1.2 training mix from preprocessed dataset files.
 Combines all preprocessed JSONL files into a single shuffled training file.
 Each source is capped to its target row count.
 
-Pruned mix (~149K rows, quality-filtered):
-  - Nemotron tool_calling:     40K  (tool calling — top 50% by complexity)
-  - opencoder_reasoning:       25K  (coding — top by reasoning trace length)
-  - swesmith:                  20K  (agentic — ≥3 tool calls per trajectory)
-  - nemotron_agentic:          19K  (agent + tool calling — keep all)
-  - code_feedback:             15K  (coding — multi-turn ≥4 messages only)
-  - xlam:                      15K  (tool calling — keep all)
-  - nemotron_swe:              10K  (agentic — SWE problem-solving with tools)
-  - magicoder:                  5K  (coding — top by problem length)
+Jackrong-inspired mix (~157K rows, ~700M tokens, 2026-04-05):
+  Philosophy: quality > quantity, tiered token limits (8K/16K)
+
+  Tier 1 — ≤8K tokens (Coding + Tool Calling):
+    nemotron_tool_calling:          ~40K  (top by tool call count)
+    competitive_programming:        ~28K  (NEW — Jackrong blend, 87.5% Nemotron Python competitive coding)
+    nemotron_agentic:               ~19K  (all kept — 99.1% naturally ≤8K)
+    xlam:                           ~15K  (all kept)
+    code_feedback:                  ~15K  (multi-turn ≥4 msgs)
+    qwen3_coder_distill:            ~9.5K (NEW — distilled from Qwen3-Coder-480B via rStar-Coder)
+    magicoder:                       ~5K  (top 5K by length)
+
+  Tier 2 — ≤16K tokens (Agentic/SWE):
+    opencoder_reasoning:            ~16K  (64.1% of 25K survive 16K filter)
+    swesmith:                       ~10K  (48.9% of 20K survive 16K filter)
+
+  Dropped entirely:
+    nemotron_swe — 100% of rows exceed 16K tokens (median 43K), zero useful signal.
 
 Previous mix (262K, unfiltered):
   Use --use-unfiltered to build from the original *_converted.jsonl files.
@@ -24,19 +33,28 @@ import sys
 from pathlib import Path
 
 # Source configs: (filename, max_rows, source_label)
-# Pruned mix: quality-filtered files from v1.2_pruned/
-SOURCES_PRUNED = [
+
+# Tier 1: ≤8K tokens (coding + tool calling) — token filtering done by filter_for_v12_pruned.py
+SOURCES_TIER1 = [
     ("nemotron_tool_calling_filtered.jsonl", 40_000, "nemotron_tool_calling"),
-    ("opencoder_reasoning_filtered.jsonl", 25_000, "opencoder_reasoning"),
-    ("swesmith_filtered.jsonl", 20_000, "swesmith"),
+    ("competitive_programming_converted.jsonl", 28_000, "competitive_programming"),
     ("nemotron_agentic_filtered.jsonl", 19_028, "nemotron_agentic"),
-    ("code_feedback_filtered.jsonl", 15_000, "code_feedback"),
     ("xlam_filtered.jsonl", 15_000, "xlam"),
-    ("nemotron_swe_filtered.jsonl", 10_000, "nemotron_swe"),
+    ("code_feedback_filtered.jsonl", 15_000, "code_feedback"),
+    ("qwen3_coder_distill_converted.jsonl", 9_500, "qwen3_coder_distill"),
     ("magicoder_filtered.jsonl", 5_000, "magicoder"),
 ]
 
-# Unfiltered mix: original *_converted.jsonl files
+# Tier 2: ≤16K tokens (agentic/SWE) — token filtering done by filter_for_v12_pruned.py
+SOURCES_TIER2 = [
+    ("opencoder_reasoning_filtered.jsonl", 16_025, "opencoder_reasoning"),
+    ("swesmith_filtered.jsonl", 9_780, "swesmith"),
+]
+
+# Combined pruned sources
+SOURCES_PRUNED = SOURCES_TIER1 + SOURCES_TIER2
+
+# Unfiltered mix: original *_converted.jsonl files (old 262K mix, kept for reference)
 SOURCES_UNFILTERED = [
     ("nemotron_tool_calling_converted.jsonl", 80_000, "nemotron_tool_calling"),
     ("opencoder_reasoning_converted.jsonl", 50_000, "opencoder_reasoning"),
@@ -81,7 +99,7 @@ def main():
     parser.add_argument(
         "--data-dir",
         default="v1.2/data/v1.2_pruned",
-        help="Directory containing preprocessed JSONL files (default: pruned)",
+        help="Directory containing preprocessed JSONL files",
     )
     parser.add_argument(
         "--output",
@@ -94,7 +112,7 @@ def main():
     parser.add_argument(
         "--use-unfiltered",
         action="store_true",
-        help="Use original unfiltered *_converted.jsonl files from v1.2/data/",
+        help="Use original unfiltered *_converted.jsonl files (old 262K mix)",
     )
     parser.add_argument(
         "--dry-run",
@@ -113,7 +131,12 @@ def main():
         sources = SOURCES_PRUNED
         data_dir = Path(args.data_dir)
         output_path = Path(args.output)
-        print("MODE: Pruned (quality-filtered ~149K mix)")
+        print("MODE: Jackrong-inspired (~157K rows, tiered 8K/16K token filter)")
+        print(
+            "  Tier 1 (≤8K): nemotron_tool_calling, competitive_programming, nemotron_agentic,"
+        )
+        print("                 xlam, code_feedback, qwen3_coder_distill, magicoder")
+        print("  Tier 2 (≤16K): opencoder_reasoning, swesmith")
 
     print(f"Data directory: {data_dir}")
     print(f"Output: {output_path}")
@@ -176,7 +199,7 @@ def main():
         print(f"\nWARNING: {len(missing)} sources missing: {', '.join(missing)}")
 
     if args.dry_run:
-        print("\nDry run complete. Use --no-dry-run to build.")
+        print("\nDry run complete. Re-run without --dry-run to build.")
         return
 
     if not all_rows:
