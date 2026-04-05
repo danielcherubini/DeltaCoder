@@ -1,7 +1,7 @@
 # Qwen3.5-DeltaCoder-9B
 
 > Reliable tool-calling for agentic coding — LoRA fine-tune of Qwen3.5-9B
-> **v1.2 in progress** — retrained from clean base with 230K coding-focused dataset
+> **qwen3.5/v1.1 in progress** — retrained from clean base with 157K coding-focused dataset
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Model](https://img.shields.io/badge/Base-Qwen3.5--9B-purple)](https://huggingface.co/Qwen/Qwen3.5-9B)
@@ -130,30 +130,33 @@ model = PeftModel.from_pretrained(base, "danielcherubini/Qwen3.5-DeltaCoder-9B")
 ## Project Structure
 
 ```
-v1.1/
-  configs/                           # v1.1 Axolotl configs (SFT + DPO)
-  scripts/                           # v1.1 scripts (train_unsloth, merge_and_export)
-  data/                              # v1.1 DPO pairs (gitignored)
-  outputs/                           # v1.1 DPO adapter (gitignored)
-  logs/                              # v1.1 training logs (gitignored)
-v1.2/
-  configs/
-    deltacoder-9b-lora-v1.2.yaml     # Axolotl SFT config
-  scripts/
-    train_dpo.py                     # DPO training (HF+PEFT+TRL, no Unsloth)
-    generate_dpo_pairs.py            # On-policy DPO pair generation (async)
-    merge_and_export_dpo.py          # LoRA merge + GGUF export
-    pretokenize.py                   # Pre-tokenization (8192 context)
-    preprocess_*.py                  # Dataset preprocessing scripts
-    merge_datasets.py                # Combine and shuffle all datasets
-  data/                              # v1.2 SFT data + preprocessed datasets (gitignored)
-  merged/                            # v1.2 merged SFT model (17GB, gitignored)
-  lora_adapter/                      # v1.2 SFT LoRA adapter (gitignored)
-v1.3/
-  configs/axolotl.yaml               # 32768 sequence length config
-  scripts/pretokenize.py             # 32K context pretokenization
-data/
-  dpo_pairs_v1.2.jsonl               # v1.2 DPO pairs (4,521 pairs)
+qwen3.5/
+  v1.0/                              # Original 9B (SFT + DPO, Axolotl configs)
+    configs/                         # Axolotl configs (SFT + DPO)
+    scripts/                         # train_unsloth, merge_and_export, etc.
+    data/                            # DPO pairs (gitignored)
+    outputs/                         # DPO adapter (gitignored)
+    logs/                            # training logs (gitignored)
+  v1.1/                              # Revised 9B (Jackrong-inspired, Unsloth + packing at 32K)
+    configs/
+      deltacoder-9b-lora-v1.1.yaml   # Axolotl SFT config
+    scripts/
+      train_dpo.py                   # DPO training (HF+PEFT+TRL, no Unsloth)
+      generate_dpo_pairs.py          # On-policy DPO pair generation (async)
+      merge_and_export_dpo.py        # LoRA merge + GGUF export
+      pretokenize_for_sft.py         # Pre-tokenization (32768 context)
+      preprocess_*.py                # Dataset preprocessing scripts
+      merge_datasets.py              # Combine and shuffle all datasets
+    data/                            # SFT training data + preprocessed datasets (gitignored)
+    merged/                          # Merged SFT model (gitignored)
+    lora_adapter/                    # SFT LoRA adapter (gitignored)
+  35b-a3b/                           # MoE fine-tune (NEW — scripts pending)
+    scripts/
+qwen3.6/
+  v1.0/                              # Qwen3.6 (BLOCKED — waiting for open weights)
+    configs/
+    scripts/
+    data/                            # Training data (gitignored)
 docs/
   plans/                             # Implementation plans
 ```
@@ -222,7 +225,7 @@ For VRAM-constrained GPUs:
 |-------|-------|
 | DeltaCoder v1 | 2/4 (50%) |
 | DeltaCoder v1.1-DPO | 2/4 (50%) — different failure mode |
-| DeltaCoder v1.2 | TBD |
+| DeltaCoder Qwen3.5 v1.1 | TBD |
 
 ## Acknowledgements
 

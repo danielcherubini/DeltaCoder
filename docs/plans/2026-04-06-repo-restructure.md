@@ -1,5 +1,7 @@
 # Repository Restructure: Version Folders → Model-Based Folders
 
+> **Note:** This plan has been **executed** (2026-04-06). The paths shown here reference both old (`v1.1/`, `v1.2/`, `v1.3/`) and new (`qwen3.5/v1.0/`, `qwen3.5/v1.1/`, `qwen3.6/v1.0/`) paths as part of the migration mapping. This is intentional — the plan is a historical record of the restructure.
+
 **Goal:** Reorganize the repo from `v1.1/v1.2/v1.3` flat versioning to a model-based hierarchy: `qwen3.5/` (with `v1.0`, `v1.1`, `35b-a3b` subdirs) and `qwen3.6/` (with `v1.0`). Renumber versions and update all internal references.
 
 **Architecture:** Use `git mv` to move folders (preserves blame/history). Then update all hardcoded paths, default CLI args, data file prefixes, GitHub raw URLs, docstrings, .gitignore patterns, AGENTS.md, and plan docs. Historical plan docs get a deprecation header instead of full rewrites.
