@@ -1,10 +1,11 @@
-# AGENTS.md — DeltaCoder v1.3
+# AGENTS.md — DeltaCoder
 
 ## 1. Project Overview
 
 **DeltaCoder** is a code-specialized LLM fine-tune:
-- **v1.2**: SFT + DPO on Qwen3.5-9B at 32768 context (completed pipeline, all scripts validated)
-- **v1.3**: SFT + DPO on **Qwen3.6** (BLOCKED — waiting for open weights release)
+- **qwen3.5/v1.1**: SFT + DPO on Qwen3.5-9B at 32768 context (completed pipeline, all scripts validated)
+- **qwen3.5/35b-a3b**: SFT fine-tune of Qwen3.5-35B-A3B MoE (NEW — plan written, scripts pending)
+- **qwen3.6/v1.0**: SFT + DPO on **Qwen3.6** (BLOCKED — waiting for open weights release)
 - Priorities (in order): (1) Coding, (2) Tool Calling, (3) Agentic Workflows
 - Target: THE BEST 9B for those three tasks
 - **MUST preserve vision capabilities** — base models are VLMs
@@ -13,23 +14,26 @@
 
 ```
 DeltaCoder/
-├── v1.1/
-│   ├── configs/       # v1.1 Axolotl configs (SFT + DPO)
-│   ├── scripts/       # v1.1 scripts (train_unsloth, merge_and_export, etc.)
-│   ├── data/          # v1.1 DPO pairs (gitignored)
-│   ├── outputs/       # v1.1 DPO adapter (gitignored)
-│   └── logs/          # v1.1 training logs (gitignored)
-├── v1.2/
-│   ├── configs/       # v1.2 Axolotl SFT config
-│   ├── scripts/       # v1.2 scripts (pretokenize, train_dpo, preprocess_*, etc.)
-│   ├── data/          # v1.2 SFT training data + preprocessed datasets (gitignored)
-│   ├── lora_adapter/  # v1.2 SFT LoRA adapter (gitignored)
-│   ├── merged/        # v1.2 merged SFT model (17GB, gitignored)
-│   └── v1.2_axolotl_train.log
-├── v1.3/
-│   ├── configs/       # v1.3 Axolotl config (sequence_len=32768)
-│   ├── scripts/       # v1.3 scripts (all adapted from v1.2 for Qwen3.6)
-│   └── data/          # v1.3 training data (gitignored)
+├── qwen3.5/
+│   ├── v1.0/              # Original 9B (SFT + DPO, Axolotl configs)
+│   │   ├── configs/
+│   │   ├── scripts/
+│   │   ├── data/          # DPO pairs (gitignored)
+│   │   ├── outputs/       # DPO adapter (gitignored)
+│   │   └── logs/          # training logs (gitignored)
+│   ├── v1.1/              # Revised 9B (Jackrong-inspired, Unsloth + packing at 32K)
+│   │   ├── configs/
+│   │   ├── scripts/
+│   │   ├── data/          # SFT training data + preprocessed datasets (gitignored)
+│   │   ├── lora_adapter/  # SFT LoRA adapter (gitignored)
+│   │   └── merged/        # Merged SFT model (gitignored)
+│   └── 35b-a3b/           # MoE fine-tune (NEW — plan written, scripts pending)
+│       └── scripts/
+├── qwen3.6/
+│   └── v1.0/              # Qwen3.6 (BLOCKED — waiting for open weights)
+│       ├── configs/
+│       ├── scripts/
+│       └── data/          # Training data (gitignored)
 ├── docs/              # Documentation + plans
 ├── AGENTS.md          # This file
 └── README.md
@@ -53,10 +57,10 @@ vastai create instance <OFFER_ID> \
   --ssh --direct
 
 # Then SSH in and bootstrap:
-curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/v1.2/scripts/provision.sh
+curl -fsSL -o /workspace/provision.sh https://raw.githubusercontent.com/danielcherubini/DeltaCoder/main/qwen3.5/v1.1/scripts/provision.sh
 bash /workspace/provision.sh
 # Upload pre-tokenized data:
-scp -P <PORT> v1.2/data/v1.2_pretokenized/*.parquet root@<IP>:/workspace/v1.2_pretokenized/
+scp -P <PORT> qwen3.5/v1.1/data/v1.1_pretokenized/*.parquet root@<IP>:/workspace/v1.1_pretokenized/
 ```
 
 **NOTE:** The `PROVISIONING_SCRIPT` env var does NOT auto-run on the `vastai/pytorch` image.
@@ -89,7 +93,7 @@ Vast.ai has version-tagged Docker images with precise CUDA/PyTorch/Python combin
 The `PROVISIONING_SCRIPT` env var does NOT auto-run on the `vastai/pytorch` image despite docs.
 Must download and run `provision.sh` manually after SSH.
 
-**Provisioning script**: `v1.2/scripts/provision.sh` — **validated 2026-04-02**, installs
+**Provisioning script**: `qwen3.5/v1.1/scripts/provision.sh` — **validated 2026-04-02**, installs
 everything in ~4 minutes on a fresh H100 instance:
 1. Creates Python 3.12 venv at `/workspace/venv/`
 2. Installs Unsloth 2026.3.18 + all dependencies
@@ -188,12 +192,12 @@ with open(path) as f:
     official = json.load(f)
 
 # Read flat text config from merged model
-with open('/workspace/merged_v1.2/config.json') as f:
+with open('/workspace/merged_v1.1/config.json') as f:
     text_config = json.load(f)
 
 # Wrap it: text_config goes inside the VL wrapper
 official['text_config'] = text_config
-with open('/workspace/merged_v1.2/config.json', 'w') as f:
+with open('/workspace/merged_v1.1/config.json', 'w') as f:
     json.dump(official, f, indent=2)
 ```
 
@@ -202,7 +206,7 @@ Also fix `tokenizer_config.json` if it has `"tokenizer_class": "TokenizersBacken
 **Serve:**
 ```bash
 source /workspace/vllm-env/bin/activate
-vllm serve /workspace/merged_v1.2 \
+vllm serve /workspace/merged_v1.1 \
     --port 18000 --host 0.0.0.0 \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.90 \
@@ -216,8 +220,8 @@ vllm serve /workspace/merged_v1.2 \
 ```bash
 git clone https://github.com/ikawrakow/ik_llama.cpp /workspace/ik_llama.cpp
 cd /workspace/ik_llama.cpp && cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j
-python3 /workspace/llama.cpp/convert_hf_to_gguf.py /workspace/merged_v1.2 --outfile /workspace/merged_v1.2.Q8_0.gguf --outtype q8_0
-/workspace/ik_llama.cpp/build/bin/llama-server -m /workspace/merged_v1.2.Q8_0.gguf --port 18000 --host 0.0.0.0 -ngl 999 -c 4096 --jinja -fa
+python3 /workspace/llama.cpp/convert_hf_to_gguf.py /workspace/merged_v1.1 --outfile /workspace/merged_v1.1.Q8_0.gguf --outtype q8_0
+/workspace/ik_llama.cpp/build/bin/llama-server -m /workspace/merged_v1.1.Q8_0.gguf --port 18000 --host 0.0.0.0 -ngl 999 -c 4096 --jinja -fa
 ```
 
 ### ALWAYS use:
@@ -281,77 +285,146 @@ def main():
 
 | Script | Purpose |
 |--------|---------|
-| `v1.2/scripts/train_unsloth.py` | SFT training with Unsloth FastVisionModel + packing at 32K |
-| `v1.2/scripts/pretokenize_for_sft.py` | Pre-tokenize training data to parquet shards (run on Romulus) |
-| `v1.2/scripts/patch_vlm_packing.py` | Removes VLM packing block from unsloth/trainer.py |
-| `v1.2/scripts/provision.sh` | Vast.ai bootstrap: installs all deps in ~4 min |
-| `v1.2/scripts/pretokenize.py` | Tokenize v1.2 data (8192 context) |
-| `v1.2/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
-| `v1.2/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
-| `v1.2/scripts/generate_dpo_pairs.py` | Generate on-policy DPO pairs via OpenAI-compatible API |
-| `v1.3/scripts/pretokenize_for_sft.py` | Pre-tokenize v1.3 data for Qwen3.6 (32768 context) |
-| `v1.3/scripts/train_unsloth.py` | v1.3 SFT training (adapted for Qwen3.6) |
-| `v1.3/scripts/provision.sh` | v1.3 Vast.ai bootstrap (adapted for Qwen3.6) |
-| `v1.3/scripts/train_dpo.py` | v1.3 DPO training (adapted for Qwen3.6) |
-| `v1.3/scripts/merge_and_export_dpo.py` | v1.3 merge LoRA + GGUF export |
-| `v1.3/scripts/generate_dpo_pairs.py` | v1.3 DPO pair generation |
+| `qwen3.5/v1.1/scripts/train_unsloth.py` | SFT training with Unsloth FastVisionModel + packing at 32K |
+| `qwen3.5/v1.1/scripts/pretokenize_for_sft.py` | Pre-tokenize training data to parquet shards (run on Romulus) |
+| `qwen3.5/v1.1/scripts/patch_vlm_packing.py` | Removes VLM packing block from unsloth/trainer.py |
+| `qwen3.5/v1.1/scripts/provision.sh` | Vast.ai bootstrap: installs all deps in ~4 min |
+| `qwen3.5/v1.1/scripts/pretokenize.py` | Tokenize v1.1 data (8192 context) |
+| `qwen3.5/v1.1/scripts/train_dpo.py` | DPO training on top of SFT-merged model (supports `--ling-coder N` to mix in Ling-Coder-DPO) |
+| `qwen3.5/v1.1/scripts/merge_and_export_dpo.py` | Merge LoRA + export to GGUF |
+| `qwen3.5/v1.1/scripts/generate_dpo_pairs.py` | Generate on-policy DPO pairs via OpenAI-compatible API |
+| `qwen3.5/v1.1/scripts/build_training_mix.py` | Build final JSONL training mix from filtered sources |
+| `qwen3.5/v1.1/scripts/filter_for_v12_pruned.py` | Apply tiered 8K/16K token filters to each source |
+| `qwen3.5/v1.1/scripts/preprocess_competitive_programming.py` | Download + convert Jackrong competitive programming dataset |
+| `qwen3.5/v1.1/scripts/preprocess_qwen3_coder_distill.py` | Download + convert Jackrong Qwen3-Coder-480B distill dataset |
+| `qwen3.6/v1.0/scripts/pretokenize_for_sft.py` | Pre-tokenize Qwen3.6 v1.0 data (32768 context) |
+| `qwen3.6/v1.0/scripts/train_unsloth.py` | Qwen3.6 v1.0 SFT training (adapted for Qwen3.6) |
+| `qwen3.6/v1.0/scripts/provision.sh` | Qwen3.6 v1.0 Vast.ai bootstrap (adapted for Qwen3.6) |
+| `qwen3.6/v1.0/scripts/train_dpo.py` | Qwen3.6 v1.0 DPO training |
+| `qwen3.6/v1.0/scripts/merge_and_export_dpo.py` | Qwen3.6 v1.0 merge LoRA + GGUF export |
+| `qwen3.6/v1.0/scripts/generate_dpo_pairs.py` | Qwen3.6 v1.0 DPO pair generation |
+| `qwen3.6/v1.0/scripts/build_training_mix.py` | Qwen3.6 v1.0 training mix builder |
+| `qwen3.6/v1.0/scripts/filter_for_v12_pruned.py` | Qwen3.6 v1.0 tiered 8K/16K token filters |
+| `qwen3.6/v1.0/scripts/preprocess_competitive_programming.py` | Qwen3.6 v1.0 competitive programming preprocessing |
+| `qwen3.6/v1.0/scripts/preprocess_qwen3_coder_distill.py` | Qwen3.6 v1.0 Qwen3-Coder-480B distill preprocessing |
 
 ## 7. Training Monitoring
 
 ```bash
 # Watch training log in real-time
-tail -f logs/v1.3_axolotl_train.log
+tail -f /workspace/logs/*.log
 
 # Check GPU memory
 watch -n 1 'nvidia-smi'
 
 # Training loss (grep from log)
-grep -E "^\s*loss:" logs/v1.3_axolotl_train.log | tail -n 50
+grep -E "^\s*loss:" /workspace/logs/*.log | tail -n 50
 ```
 
 ## 8. HuggingFace Repos
 
-- `danielcherubini/Qwen3.5-DeltaCoder-9B` — v1.1/v1.2 DPO adapter
-- `danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF` — v1.1/v1.2 GGUF quantizations
-- `danielcherubini/Qwen3.6-DeltaCoder-9B` — v1.3 adapter (TODO: create when ready)
-- `danielcherubini/Qwen3.6-DeltaCoder-9B-GGUF` — v1.3 GGUFs (TODO: create when ready)
+- `danielcherubini/Qwen3.5-DeltaCoder-9B` — Qwen3.5 v1.0/v1.1 DPO adapter
+- `danielcherubini/Qwen3.5-DeltaCoder-9B-GGUF` — Qwen3.5 v1.0/v1.1 GGUF quantizations
+- `danielcherubini/Qwen3.5-DeltaCoder-35B-A3B` — 35B-A3B adapter (TODO: create when ready)
+- `danielcherubini/Qwen3.5-DeltaCoder-35B-A3B-GGUF` — 35B-A3B GGUFs (TODO: create when ready)
+- `danielcherubini/Qwen3.6-DeltaCoder-9B` — Qwen3.6 v1.0 adapter (TODO: create when ready)
+- `danielcherubini/Qwen3.6-DeltaCoder-9B-GGUF` — Qwen3.6 v1.0 GGUFs (TODO: create when ready)
 
-## 9. v1.3 Structure
+## 9. Qwen3.6 v1.0 Structure
 
-- `v1.3/configs/axolotl.yaml` — 32768 sequence length config
-- `v1.3/scripts/pretokenize_for_sft.py` — 32K context pretokenization for Qwen3.6
-- `v1.3/scripts/train_unsloth.py` — SFT training for Qwen3.6
-- `v1.3/scripts/provision.sh` — Vast.ai bootstrap for Qwen3.6
-- `v1.3/scripts/train_dpo.py` — DPO training for Qwen3.6
-- `v1.3/scripts/generate_dpo_pairs.py` — DPO pair generation
-- `v1.3/scripts/merge_and_export_dpo.py` — Merge + GGUF export
+- `qwen3.6/v1.0/configs/` — Axolotl config placeholder (BLOCKED)
+- `qwen3.6/v1.0/scripts/pretokenize_for_sft.py` — 32K context pretokenization for Qwen3.6
+- `qwen3.6/v1.0/scripts/train_unsloth.py` — SFT training for Qwen3.6
+- `qwen3.6/v1.0/scripts/provision.sh` — Vast.ai bootstrap for Qwen3.6
+- `qwen3.6/v1.0/scripts/train_dpo.py` — DPO training for Qwen3.6
+- `qwen3.6/v1.0/scripts/generate_dpo_pairs.py` — DPO pair generation
+- `qwen3.6/v1.0/scripts/merge_and_export_dpo.py` — Merge + GGUF export
 
 ## 10. Quick Commands
 
 ```bash
-# v1.2 DPO training (on-policy only)
-python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2
+# v1.1 DPO training (on-policy only)
+python qwen3.5/v1.1/scripts/train_dpo.py --sft-model /workspace/merged_v1.1
 
-# v1.2 DPO training (on-policy + 50K Ling-Coder-DPO)
-python v1.2/scripts/train_dpo.py --sft-model /workspace/merged_v1.2 --ling-coder 50000
+# v1.1 DPO training (on-policy + 50K Ling-Coder-DPO)
+python qwen3.5/v1.1/scripts/train_dpo.py --sft-model /workspace/merged_v1.1 --ling-coder 50000
 
-# v1.3 pretokenize (32K context)
-python v1.3/scripts/pretokenize_for_sft.py --data v1.2/data/v1.2_sft_train_pruned.jsonl --output v1.3/data/v1.3_pretokenized.parquet
+# v1.1 pretokenize (32K context)
+python qwen3.5/v1.1/scripts/pretokenize_for_sft.py --data qwen3.5/v1.1/data/v1.1_sft_train_pruned.jsonl --output qwen3.5/v1.1/data/v1.1_pretokenized.parquet
 
-# v1.3 dry run
-python v1.3/scripts/train_unsloth.py --data /workspace/v1.3_pretokenized.parquet --max-steps 20
+# v1.1 dry run
+python qwen3.5/v1.1/scripts/train_unsloth.py --data /workspace/v1.1_pretokenized.parquet --max-steps 20
+
+# Qwen3.6 v1.0 pretokenize (32K context)
+python qwen3.6/v1.0/scripts/pretokenize_for_sft.py --data qwen3.6/v1.0/data/v1.0_sft_train_pruned.jsonl --output qwen3.6/v1.0/data/v1.0_pretokenized.parquet
+
+# Qwen3.6 v1.0 dry run
+python qwen3.6/v1.0/scripts/train_unsloth.py --data /workspace/v1.0_pretokenized.parquet --max-steps 20
 
 # Merge + export to GGUF
-python v1.2/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.2 \
-    --dpo-adapter ./outputs/deltacoder-9b-v1.2-dpo/lora_adapter \
-    --merged-dir ./outputs/deltacoder-9b-v1.2-dpo-merged \
-    --gguf-dir ./outputs/deltacoder-9b-v1.2-dpo-gguf \
-    --filename-prefix DeltaCoder-9B-v1.2-DPO \
+python qwen3.5/v1.1/scripts/merge_and_export_dpo.py --sft-model /workspace/merged_v1.1 \
+    --dpo-adapter ./outputs/deltacoder-9b-v1.1-dpo/lora_adapter \
+    --merged-dir ./outputs/deltacoder-9b-v1.1-dpo-merged \
+    --gguf-dir ./outputs/deltacoder-9b-v1.1-dpo-gguf \
+    --filename-prefix DeltaCoder-9B-v1.1-DPO \
     --llama-cpp-dir /workspace/llama.cpp \
     --keep-merged --upload --hf-token $HF_TOKEN
 ```
 
-## 11. Key Discoveries & Constraints
+## 11. Training Dataset & Strategy (Jackrong-Inspired, 2026-04-05)
+
+### Core Philosophy: Quality > Quantity
+
+After analyzing Jackrong's Qwopus3.5-9B-v3 (87.80% HumanEval vs our v1 regression to 50.6%),
+we revised the entire training approach. Key changes:
+- **`lora_alpha=64`** (1:1 ratio with r=64, was 0.5:1) — Jackrong-validated
+- **`train_on_responses_only=True`** — mask user/system tokens, loss only on assistant responses
+- **1 epoch** (157K rows is already 10x Jackrong's dataset size)
+- **Tiered token limits** instead of uniform truncation
+
+### New Dataset Mix (~157K rows, ~700M tokens)
+
+**Tier 1 — ≤8K tokens (Coding + Tool Calling):**
+| Source | Rows | Notes |
+|--------|------|-------|
+| nemotron_tool_calling | ~40,000 | Filtered by tool call count |
+| competitive_programming | ~28,000 | NEW — Jackrong blend, 87.5% Nemotron Python competitive coding |
+| nemotron_agentic | ~18,850 | All kept (99.1% naturally ≤8K) |
+| xlam | ~15,000 | All kept |
+| code_feedback | ~14,985 | Multi-turn ≥4 messages |
+| qwen3_coder_distill | ~9,500 | NEW — distilled from Qwen3-Coder-480B via rStar-Coder |
+| magicoder | ~5,000 | Top 5K by length |
+
+**Tier 2 — ≤16K tokens (Agentic/SWE):**
+| Source | Rows | Notes |
+|--------|------|-------|
+| opencoder_reasoning | ~16,025 | 64.1% of 25K survive 16K filter |
+| swesmith | ~9,780 | 48.9% of 20K survive 16K filter |
+
+**Dropped entirely:** `nemotron_swe` — 100% of rows exceed 16K (median 43K).
+
+### New Jackrong Datasets
+- **`Jackrong/Competitive-Programming-python-blend`**: ~28K rows, already in `messages` format
+  with `<think>` blocks, apache-2.0/cc-by-4.0. Proved to boost HumanEval by +4.87pp.
+- **`Jackrong/qwen3-coder-480b-distill-mini`**: 9,543 rows, distilled from Qwen3-Coder-480B.
+  Uses `Input`/`code_output` format — converted by `preprocess_qwen3_coder_distill.py`.
+
+### `train_on_responses_only` Implementation
+```python
+from unsloth.chat_templates import train_on_responses_only
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part="<|im_start|>user\n",
+    response_part="<|im_start|>assistant\n",
+)
+```
+Applied after `SFTTrainer(...)` creation, before `trainer.train()`.
+Use `--no-response-only` flag on `train_unsloth.py` to disable for ablation.
+
+### Cost Reduction
+~700M tokens vs old 1.4B = ~half the training steps → **~$100-130** (was ~$200-260).
+
+## 12. Key Discoveries & Constraints
 
 ### 32K context cross_entropy OOM (Axolotl path — NOT used)
 - The VL model (`Qwen3_5ForConditionalGeneration`) materializes full logits tensor

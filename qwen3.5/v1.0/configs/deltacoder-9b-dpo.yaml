@@ -1,0 +1,83 @@
+# DeltaCoder v1.0-DPO — Hyperparameter Reference
+# This file documents the DPO training configuration.
+# The actual hyperparameters live in scripts/train_dpo.py.
+
+model:
+  # The merged v1 model (SFT-trained, published on HuggingFace).
+  # DPO trains ON TOP of this — not on the base Jackrong model.
+  name: danielcherubini/Qwen3.5-DeltaCoder-9B
+  max_seq_length: 4096
+  # QLoRA not recommended for Qwen3.5 (accuracy loss from GDN kernels)
+  precision: bf16
+
+lora:
+  # Half of v1's r=64 — DPO needs less capacity than SFT
+  r: 32
+  # alpha = r is standard
+  lora_alpha: 32
+  # Unsloth-optimised
+  lora_dropout: 0
+  bias: none
+  # Proven target_modules from v1 — the GDN projections are critical.
+  # Qwen3.5 has 32 layers: 8 full attention + 24 GDN.
+  # Omitting in_proj_* leaves 75% of attention layers untrained.
+  target_modules:
+    # Full Attention (8 layers)
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # GDN / Gated DeltaNet (24 layers)
+    - in_proj_qkv
+    - in_proj_z
+    - in_proj_b
+    - in_proj_a
+    - out_proj
+    # MLP (all 32 layers)
+    - gate_proj
+    - up_proj
+    - down_proj
+
+dpo:
+  # DPO temperature — controls KL divergence penalty from reference.
+  # 0.1 is the standard starting point. Higher = more conservative.
+  beta: 0.1
+  # Standard DPO loss (Bradley-Terry model). Alternatives: ipo, hinge.
+  loss_type: sigmoid
+  # Unsloth implicit reference: uses frozen copy of initial weights.
+  # Saves ~18GB VRAM vs loading a separate reference model.
+  ref_model: null
+
+training:
+  # ~20x lower than SFT (1e-4). DPO is very LR-sensitive —
+  # too high causes reward hacking and format collapse.
+  learning_rate: 5e-6
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  # 1 epoch on ~2.5-3.5K pairs is sufficient
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  # Effective batch size = 16
+  gradient_accumulation_steps: 16
+  bf16: true
+  # More numerically stable than adamw_8bit for DPO
+  optim: adamw_torch
+  # Max total (prompt + response) token length
+  max_length: 4096
+  # AceCode-V2 questions rarely exceed 1K tokens
+  max_prompt_length: 1024
+
+dataset:
+  source: data/dpo_pairs.jsonl
+  # [{role: user, content: ...}] lists — TRL applies chat template automatically
+  format: conversational
+  # From 10K problems x 8 samples at ~50% pass rate
+  expected_pairs: 2500-3500
+  # On-policy — pairs generated from the model we're aligning
+  generation_model: DeltaCoder-9B-Q4_K_M
+
+evaluation:
+  # Compare before/after on:
+  # - HumanEval (baseline v1: 50.6% temp=0.6, 43.9% greedy)
+  # - Terminal-Bench easy 4 tasks (baseline v1: 50% with env fixes)
+  # Success criterion: HumanEval greedy improves toward sampled score

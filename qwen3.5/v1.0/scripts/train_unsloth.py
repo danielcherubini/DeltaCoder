@@ -1,0 +1,269 @@
+"""
+Qwen3.5-DeltaCoder-9B Qwen3.5 v1.0 — Unsloth LoRA SFT training script.
+Loads preprocessed JSONL from local disk, uses Unsloth's VLM SFT pipeline.
+
+Qwen3.5 is a unified VLM — must use FastVisionModel + UnslothVisionDataCollator.
+See: https://unsloth.ai/docs/models/qwen3.5/fine-tune
+
+Usage:
+    # Dry run (5 steps):
+    python scripts/train_unsloth.py --max_steps 5
+
+    # Full training:
+    python scripts/train_unsloth.py
+"""
+
+import argparse
+import json
+
+from unsloth import FastVisionModel
+from unsloth.trainer import UnslothVisionDataCollator
+from trl import SFTTrainer, SFTConfig
+from transformers import AutoTokenizer
+import torch
+import copy
+
+# ---------- Config ----------
+MODEL_NAME = "Qwen/Qwen3.5-9B"
+MAX_SEQ_LENGTH = 2048
+OUTPUT_DIR = "./outputs/deltacoder-9b-v1.0"
+LORA_R = 64
+LORA_ALPHA = 32
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="DeltaCoder Qwen3.5 v1.0 SFT training")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="data/v1.0_sft_train.jsonl",
+        help="Path to preprocessed training JSONL",
+    )
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=-1,
+        help="Override epochs with fixed step count (e.g. 5 for dry run)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=OUTPUT_DIR,
+        help="Output directory for checkpoints and adapter",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    # ---------- Load model ----------
+    # Must use FastVisionModel for Qwen3.5 (it's a VLM architecture)
+    print("Loading model...")
+    model, tokenizer = FastVisionModel.from_pretrained(
+        model_name=MODEL_NAME,
+        max_seq_length=MAX_SEQ_LENGTH,
+        load_in_4bit=False,  # No QLoRA for Qwen3.5
+        load_in_16bit=True,  # bf16 LoRA
+        trust_remote_code=True,
+    )
+
+    # ---------- LoRA ----------
+    print("Applying LoRA...")
+    model = FastVisionModel.get_peft_model(
+        model,
+        finetune_vision_layers=False,  # Text-only SFT — skip vision encoder
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        lora_dropout=0,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
+    )
+
+    # ---------- Dataset ----------
+    # UnslothVisionDataCollator expects a list of {"messages": [...]} dicts.
+    # It applies the chat template internally via the tokenizer.
+    # Pass messages directly — do NOT pre-format to text.
+    print(f"Loading dataset from {args.dataset}...")
+
+    dataset = []
+    skipped = 0
+    with open(args.dataset, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                messages = row["messages"]
+                if isinstance(messages, str):
+                    messages = json.loads(messages)
+
+                # Validate messages are list of dicts with role/content
+                if not isinstance(messages, list) or len(messages) < 2:
+                    skipped += 1
+                    continue
+
+                # UnslothVisionDataCollator's Jinja template requires content to be
+                # a list of typed blocks: [{"type": "text", "text": "..."}]
+                # Convert plain string content to this format.
+                converted = []
+                for msg in messages:
+                    if not isinstance(msg, dict) or "role" not in msg:
+                        raise ValueError(f"Invalid message format: {msg}")
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        content = [{"type": "text", "text": content}]
+                    converted.append({"role": msg["role"], "content": content})
+
+                dataset.append({"messages": converted})
+            except Exception as e:
+                skipped += 1
+                if skipped <= 5:
+                    print(f"  Skipping row: {e}")
+
+    print(f"Prepared {len(dataset)} rows ({skipped} skipped)")
+
+    # Debug: show what the collator will see for one sample
+    print("\nSample row structure:")
+    sample = dataset[0]["messages"]
+    for msg in sample:
+        role = msg["role"]
+        content_preview = str(msg["content"])[:100]
+        print(f"  {role}: {content_preview}")
+    print()
+
+    # ---------- Custom Data Collator ----------
+    # UnslothVisionDataCollator doesn't mask user/system labels for text-only data.
+    # We wrap it to add proper label masking — only train on assistant tokens.
+    class MaskedVisionDataCollator(UnslothVisionDataCollator):
+        """Wraps UnslothVisionDataCollator to mask non-assistant labels."""
+
+        def __init__(self, model, processor):
+            super().__init__(model, processor)
+            # Token sequences will be set after construction using plain_tok
+            self._asst_header = []
+            self._end_token = []
+            self._think_start = []
+            self._diag_count = 0  # for diagnostic logging
+
+        def __call__(self, examples):
+            batch = super().__call__(examples)
+            # Mask non-assistant tokens in labels
+            for i in range(batch["input_ids"].shape[0]):
+                input_ids = batch["input_ids"][i].tolist()
+                labels = batch["labels"][i].clone()
+
+                # Find all assistant response regions and only keep those as labels
+                asst_header = self._asst_header
+                end_token = self._end_token
+                header_len = len(asst_header)
+                end_len = len(end_token)
+
+                # First mask everything
+                labels[:] = -100
+
+                # Then unmask assistant response regions
+                j = 0
+                while j < len(input_ids) - header_len:
+                    # Check for assistant header
+                    if input_ids[j : j + header_len] == asst_header:
+                        # Found assistant start — unmask from after the header
+                        # to the next <|im_end|>
+                        start = j + header_len
+                        k = start
+                        while k < len(input_ids) - end_len:
+                            if input_ids[k : k + end_len] == end_token:
+                                # Include the end token in training
+                                k += end_len
+                                break
+                            k += 1
+                        labels[start:k] = batch["input_ids"][i][start:k]
+                        j = k
+                    else:
+                        j += 1
+
+                batch["labels"][i] = labels
+
+            # Diagnostic: print masking stats for first 2 batches
+            if self._diag_count < 2:
+                self._diag_count += 1
+                for i in range(batch["input_ids"].shape[0]):
+                    total = (batch["input_ids"][i] != 0).sum().item()  # non-pad
+                    unmasked = (batch["labels"][i] != -100).sum().item()
+                    pct = 100.0 * unmasked / total if total > 0 else 0
+                    print(
+                        f"  [DIAG] batch {self._diag_count} sample {i}: "
+                        f"{unmasked}/{total} tokens unmasked ({pct:.1f}%)"
+                    )
+            return batch
+
+    # Plain tokenizer for encoding header token sequences (not for the collator)
+    plain_tok = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+
+    # ---------- Trainer ----------
+    print("Setting up trainer...")
+    FastVisionModel.for_training(model)
+
+    sft_config_kwargs = dict(
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,  # effective batch = 32
+        warmup_ratio=0.05,
+        num_train_epochs=1,
+        logging_steps=10,
+        save_steps=0.25,
+        save_total_limit=3,
+        output_dir=args.output_dir,
+        optim="adamw_torch",
+        learning_rate=1e-4,
+        lr_scheduler_type="cosine",
+        weight_decay=0.01,
+        bf16=True,
+        seed=3407,
+        report_to="none",
+        # Required for VLM SFT:
+        remove_unused_columns=False,
+        dataset_text_field="",
+        dataset_kwargs={"skip_prepare_dataset": True},
+        max_length=MAX_SEQ_LENGTH,
+        dataset_num_proc=1,
+    )
+
+    if args.max_steps > 0:
+        sft_config_kwargs["max_steps"] = args.max_steps
+
+    # Pass the Unsloth tokenizer (vision processor) to the collator — NOT plain_tok
+    collator = MaskedVisionDataCollator(model, tokenizer)
+    # Store plain_tok on the collator for header token encoding
+    collator._asst_header = plain_tok.encode(
+        "<|im_start|>assistant\n", add_special_tokens=False
+    )
+    collator._end_token = plain_tok.encode("<|im_end|>", add_special_tokens=False)
+    collator._think_start = plain_tok.encode("<think>", add_special_tokens=False)
+
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        data_collator=collator,
+        train_dataset=dataset,
+        args=SFTConfig(**sft_config_kwargs),
+    )
+
+    # ---------- Train ----------
+    print("Starting training...")
+    trainer.train()
+
+    # ---------- Save ----------
+    adapter_path = f"{args.output_dir}/lora_adapter"
+    print(f"Saving model to {adapter_path}...")
+    model.save_pretrained(adapter_path)
+    tokenizer.save_pretrained(adapter_path)
+    print("Done!")
+
+
+if __name__ == "__main__":
+    main()

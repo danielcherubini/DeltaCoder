@@ -4,22 +4,28 @@ __pycache__/
 last_run_prepared/
 *.gguf
 
-# v1.1 large artifacts
-v1.1/data/
-v1.1/outputs/
-v1.1/logs/
+# qwen3.5/v1.0 (was v1.1) large artifacts
+qwen3.5/v1.0/data/
+qwen3.5/v1.0/outputs/
+qwen3.5/v1.0/logs/
 
-# v1.2 large artifacts (adapter weights, merged model, training data)
-v1.2/lora_adapter/
-v1.2/dpo_adapter/
-v1.2/dpo_checkpoints/
-v1.2/merged/
-v1.2/data/
-v1.2/logs/
-v1.2/*.log
+# qwen3.5/v1.1 (was v1.2) large artifacts
+qwen3.5/v1.1/lora_adapter/
+qwen3.5/v1.1/dpo_adapter/
+qwen3.5/v1.1/dpo_checkpoints/
+qwen3.5/v1.1/merged/
+qwen3.5/v1.1/data/
+qwen3.5/v1.1/logs/
+qwen3.5/v1.1/*.log
 
-# v1.3 large artifacts
-v1.3/lora_adapter/
-v1.3/merged/
-v1.3/data/
-v1.3/*.log
+# qwen3.5/35b-a3b large artifacts
+qwen3.5/35b-a3b/data/
+qwen3.5/35b-a3b/lora_adapter/
+qwen3.5/35b-a3b/merged/
+qwen3.5/35b-a3b/*.log
+
+# qwen3.6/v1.0 (was v1.3) large artifacts
+qwen3.6/v1.0/lora_adapter/
+qwen3.6/v1.0/merged/
+qwen3.6/v1.0/data/
+qwen3.6/v1.0/*.log

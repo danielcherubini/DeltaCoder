@@ -1,5 +1,8 @@
 # DeltaCoder v1.1-DPO Plan
 
+> **Note:** This plan uses pre-restructure paths (`v1.1/`, `v1.2/`, `v1.3/`).
+> The repo was restructured on 2026-04-06: `v1.1/` → `qwen3.5/v1.0/`, `v1.2/` → `qwen3.5/v1.1/`, `v1.3/` → `qwen3.6/v1.0/`.
+
 **Goal:** Add a DPO alignment phase on top of DeltaCoder v1 to improve code correctness and reduce self-verification failures, producing a publishable v1.1 model.
 
 **Architecture:** Generate on-policy chosen/rejected preference pairs by running DeltaCoder v1 on TIGER-Lab/AceCode-V2-122K problems and executing against their test cases locally; train a second LoRA adapter on top of the merged v1 model using Unsloth's DPOTrainer; merge, export to GGUF, and publish.
